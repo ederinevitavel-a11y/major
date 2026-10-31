@@ -79,7 +79,7 @@ export const Header: React.FC<HeaderProps> = ({
               Meus Agendamentos
             </button>
 
-            {isAdmin && userProfile?.rank !== 'Leader' && (
+            {isAdmin && (
               <button
                 onClick={() => setCurrentTab('members')}
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${

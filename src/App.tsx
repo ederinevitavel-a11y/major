@@ -17,7 +17,7 @@ import {
   getDoubleXpRecord,
   saveDoubleXpRecord,
 } from './services/firestoreService';
-import { fetchGuildMembers, fetchCharacter } from './services/tibiaDataService';
+import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from './services/tibiaDataService';
 import { DEFAULT_GUILDS } from './constants/guildData';
 import { Reservation, UserProfile } from './types';
 import {
@@ -95,7 +95,7 @@ const MainDashboard: React.FC = () => {
         }
 
         console.info('Iniciando atualização automática diária das 07:00 da API TibiaData...');
-        const guildMemberMap = new Map<string, { level: number; vocation: string }>();
+        const guildMemberMap = new Map<string, { level: number; vocation: string; rank: string }>();
         for (const g of DEFAULT_GUILDS) {
           try {
             const members = await fetchGuildMembers(g.name);
@@ -104,6 +104,7 @@ const MainDashboard: React.FC = () => {
                 guildMemberMap.set(m.name.trim().toLowerCase(), {
                   level: Number(m.level) || 0,
                   vocation: m.vocation || '',
+                  rank: m.rank || '',
                 });
               }
             });
@@ -118,16 +119,23 @@ const MainDashboard: React.FC = () => {
           const cleanName = u.charName.trim().toLowerCase();
           let foundLevel = 0;
           let foundVocation = u.vocation;
+          let foundRank = u.rank;
 
           const guildMatch = guildMemberMap.get(cleanName);
           if (guildMatch && guildMatch.level > 0) {
             foundLevel = guildMatch.level;
             if (guildMatch.vocation) foundVocation = guildMatch.vocation;
+            if (guildMatch.rank) {
+              foundRank = mapTibiaRankToPriority(guildMatch.rank);
+            }
           } else {
             const charInfo = await fetchCharacter(u.charName);
             if (charInfo && charInfo.level > 0) {
               foundLevel = charInfo.level;
               if (charInfo.vocation) foundVocation = charInfo.vocation;
+              if (charInfo.rank) {
+                foundRank = mapTibiaRankToPriority(charInfo.rank);
+              }
             }
           }
 
@@ -135,6 +143,7 @@ const MainDashboard: React.FC = () => {
             await updateUserProfile(u.uid, {
               level: foundLevel,
               vocation: foundVocation,
+              rank: foundRank,
             });
           }
 

@@ -145,6 +145,7 @@ export interface TibiaCharacterInfo {
   experience: number;
   vocation: string;
   world: string;
+  rank?: string;
 }
 
 export async function fetchCharacter(charName: string): Promise<TibiaCharacterInfo | null> {
@@ -165,6 +166,7 @@ export async function fetchCharacter(charName: string): Promise<TibiaCharacterIn
       experience: char.experience || 0,
       vocation: char.vocation || '',
       world: char.world || '',
+      rank: char.guild?.rank || '',
     };
   } catch (err) {
     console.error(`Erro ao buscar personagem ${clean}:`, err);

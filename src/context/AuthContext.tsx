@@ -100,8 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           saveUserProfile(profile).catch((err: unknown) => console.warn('Sync profile rank:', err));
         }
         setUserProfile(profile);
-        const isLeader = profile.rank === 'Leader';
-        setIsAdmin(isSuper || (Boolean(profile.isAdmin) && !isLeader));
+        setIsAdmin(isSuper || Boolean(profile.isAdmin));
         setNeedsCharacterLink(false);
       } else {
         // Needs to link Tibia character

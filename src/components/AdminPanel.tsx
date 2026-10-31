@@ -12,7 +12,7 @@ import {
   getAllDoubleXpRecords,
   saveDoubleXpRecord,
 } from '../services/firestoreService';
-import { fetchGuildMembers, fetchCharacter } from '../services/tibiaDataService';
+import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from '../services/tibiaDataService';
 import { PRIORITY_RANKS, RANK_METADATA, DEFAULT_GUILDS, SUPER_ADMIN_EMAIL, DAYS_CONFIG } from '../constants/guildData';
 import { ResetScheduleModal } from './ResetScheduleModal';
 import { AdminAssignModal } from './AdminAssignModal';
@@ -85,7 +85,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setSyncingLevels(true);
     try {
       let count = 0;
-      const guildMemberMap = new Map<string, { level: number; vocation: string }>();
+      const guildMemberMap = new Map<string, { level: number; vocation: string; rank: string }>();
       for (const g of DEFAULT_GUILDS) {
         try {
           const members = await fetchGuildMembers(g.name);
@@ -94,6 +94,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               guildMemberMap.set(m.name.trim().toLowerCase(), {
                 level: Number(m.level) || 0,
                 vocation: m.vocation || '',
+                rank: m.rank || '',
               });
             }
           });
@@ -107,16 +108,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         const cleanName = u.charName.trim().toLowerCase();
         let foundLevel = 0;
         let foundVocation = u.vocation;
+        let foundRank = u.rank;
 
         const guildMatch = guildMemberMap.get(cleanName);
         if (guildMatch && guildMatch.level > 0) {
           foundLevel = guildMatch.level;
           if (guildMatch.vocation) foundVocation = guildMatch.vocation;
+          if (guildMatch.rank) {
+            foundRank = mapTibiaRankToPriority(guildMatch.rank);
+          }
         } else {
           const charInfo = await fetchCharacter(u.charName);
           if (charInfo && charInfo.level > 0) {
             foundLevel = charInfo.level;
             if (charInfo.vocation) foundVocation = charInfo.vocation;
+            if (charInfo.rank) {
+              foundRank = mapTibiaRankToPriority(charInfo.rank);
+            }
           }
         }
 
@@ -124,17 +132,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           await updateUserProfile(u.uid, {
             level: foundLevel,
             vocation: foundVocation,
+            rank: foundRank,
           });
           count++;
         }
       }
 
       await onRefreshUsers();
-      setToastMessage(`Leveis e vocações sincronizados com sucesso para ${count} personagem(ns) via API TibiaData!`);
+      setToastMessage(`Leveis, vocações e ranks sincronizados com sucesso para ${count} personagem(ns) via API TibiaData!`);
       setTimeout(() => setToastMessage(null), 5000);
     } catch (err) {
       console.error(err);
-      setToastMessage('Erro ao sincronizar leveis da API TibiaData.');
+      setToastMessage('Erro ao sincronizar dados da API TibiaData.');
     } finally {
       setSyncingLevels(false);
     }
