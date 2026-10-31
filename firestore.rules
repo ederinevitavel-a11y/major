@@ -1,0 +1,115 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email == 'ederinevitavel@gmail.com' &&
+        request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() ||
+        (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isLeader() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rank == 'Leader';
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128;
+    }
+
+    // Admins registry
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidId(adminId);
+    }
+
+    // Whitelisted emails - ZERO PII EXPOSURE
+    // Only administrators can list the authorized email directory.
+    // Regular members can ONLY inspect their own exact email document to verify status.
+    match /allowed_emails/{emailId} {
+      allow get: if isAdmin() || (
+        isSignedIn() &&
+        request.auth.token.email != null &&
+        resource.data.email != null &&
+        request.auth.token.email.lower() == resource.data.email.lower()
+      );
+      allow list: if isAdmin();
+      allow write: if isAdmin() && isValidId(emailId);
+    }
+
+    // User profiles - PII ISOLATION
+    // Regular members can ONLY read their own profile document.
+    // Non-admins are strictly forbidden from listing the users collection.
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isSignedIn() &&
+        isValidId(userId) &&
+        (request.auth.uid == userId || isAdmin()) &&
+        (request.resource.data.isAdmin == false || isBootstrappedAdmin() || isAdmin());
+      allow update: if isSignedIn() &&
+        isValidId(userId) &&
+        (isAdmin() || (request.auth.uid == userId && (request.resource.data.isAdmin == resource.data.isAdmin)));
+      allow delete: if isAdmin();
+    }
+
+    // Respawns & Schedule Public Slots - Zero PII / Anonymized Occupancy
+    // Public schedule for signed in guild members containing only slot occupation status.
+    // Restriction: Only Admin or players with Leader rank can create or choose respawns.
+    match /reservations/{reservationId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        isValidId(reservationId) &&
+        (isAdmin() || (isLeader() && request.resource.data.userUid == request.auth.uid));
+      allow update: if isSignedIn() &&
+        isValidId(reservationId) &&
+        (isAdmin() || (isLeader() && resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid));
+      allow delete: if isSignedIn() &&
+        (isAdmin() || resource.data.userUid == request.auth.uid);
+    }
+
+    // Sensitive Reservation Details (Character Name, Party Members, Notes)
+    // STRICT ZERO-KNOWLEDGE BOUNDARY:
+    // Regular members can ONLY read and write their OWN reservation details.
+    // Administrators can access all records to supervise the guild schedule.
+    // Restriction: Only Admin or players with Leader rank can create or update reservation details.
+    match /reservation_details/{reservationId} {
+      allow get: if isAdmin() || (isSignedIn() && resource.data.userUid == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userUid == request.auth.uid);
+      allow create: if isSignedIn() &&
+        isValidId(reservationId) &&
+        (isAdmin() || (isLeader() && request.resource.data.userUid == request.auth.uid));
+      allow update: if isSignedIn() &&
+        isValidId(reservationId) &&
+        (isAdmin() || (isLeader() && resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid));
+      allow delete: if isSignedIn() &&
+        (isAdmin() || resource.data.userUid == request.auth.uid);
+    }
+
+    // Global Guild Settings & Public non-PII Statistics
+    match /guild_settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidId(settingId);
+    }
+  }
+}

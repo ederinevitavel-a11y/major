@@ -1,0 +1,6 @@
+{
+  "name": "Major - Gerenciamento de Respawns e Horários da Guild",
+  "description": "Dashboard administrativo SaaS para gerenciamento de respawns, horários de hunt e sorteios das guilds Missclick e Caxambu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

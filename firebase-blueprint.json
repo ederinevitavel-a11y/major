@@ -1,0 +1,207 @@
+{
+  "entities": {
+    "allowedEmail": {
+      "title": "AllowedEmail",
+      "description": "Pre-authorized emails allowed to register into the Major guild system.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Authorized user email address in lowercase."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "member"],
+          "description": "Pre-assigned role in the system."
+        },
+        "addedBy": {
+          "type": "string",
+          "description": "UID or email of the admin who granted access."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when the email was whitelisted."
+        }
+      },
+      "required": ["email", "role", "addedBy", "createdAt"]
+    },
+    "userProfile": {
+      "title": "UserProfile",
+      "description": "User profile linking authenticated Google account to their verified Tibia character.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address."
+        },
+        "charName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Tibia character name verified via Guild API."
+        },
+        "guildName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Guild name (e.g., Missclick or Caxambu)."
+        },
+        "rank": {
+          "type": "string",
+          "enum": ["Leader", "Challenger", "Guardian", "Loyal", "Member", "Beginner", "Newcomer"],
+          "description": "Guild hierarchy priority rank."
+        },
+        "vocation": {
+          "type": "string",
+          "description": "Tibia character vocation (e.g. Elite Knight, Master Sorcerer, etc)."
+        },
+        "level": {
+          "type": "number",
+          "description": "Tibia character level."
+        },
+        "isAdmin": {
+          "type": "boolean",
+          "description": "Whether user has full administrative privileges."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of registration."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last profile update."
+        }
+      },
+      "required": ["uid", "email", "charName", "guildName", "rank", "isAdmin"]
+    },
+    "reservation": {
+      "title": "Reservation",
+      "description": "Public schedule slot occupancy for signed-in guild members (zero PII/names).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique reservation key (e.g. day_respawn_timeslot)."
+        },
+        "day": {
+          "type": "string",
+          "enum": ["friday", "saturday", "sunday"],
+          "description": "Weekend day of the respawn."
+        },
+        "slotType": {
+          "type": "string",
+          "enum": ["normal", "3h"],
+          "description": "Whether the slot is standard (2h20m) or 3h special."
+        },
+        "timeSlot": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Time window (e.g. 08:00h – 10:20h)."
+        },
+        "respawnName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Name of the hunt respawn."
+        },
+        "userUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the reserving member (used for ownership verification)."
+        },
+        "isOccupied": {
+          "type": "boolean",
+          "description": "True indicating slot is currently taken."
+        },
+        "reservedAt": {
+          "type": "string",
+          "description": "ISO timestamp when booked."
+        }
+      },
+      "required": ["id", "day", "slotType", "timeSlot", "respawnName", "userUid"]
+    },
+    "reservationDetails": {
+      "title": "ReservationDetails",
+      "description": "Sensitive booking details (character name, party, notes) restricted to owner and admin.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Matches reservation ID."
+        },
+        "charName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Tibia character name of reserving player."
+        },
+        "userUid": {
+          "type": "string",
+          "description": "Firebase Auth UID."
+        },
+        "userRank": {
+          "type": "string",
+          "description": "Guild rank."
+        },
+        "partyMembers": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Party compositions."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Hunt notes."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp."
+        }
+      },
+      "required": ["id", "charName", "userUid"]
+    },
+    "guildSetting": {
+      "title": "GuildSetting",
+      "description": "Global configuration and cached guild data.",
+      "type": "object",
+      "properties": {
+        "activeGuilds": {
+          "type": "string",
+          "description": "Comma separated active guild names."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp."
+        }
+      },
+      "required": ["activeGuilds"]
+    }
+  },
+  "firestore": {
+    "/allowed_emails/{emailId}": {
+      "schema": { "$ref": "#/entities/allowedEmail" },
+      "description": "List of authorized emails for access control."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/userProfile" },
+      "description": "Registered guild member profiles linked to character."
+    },
+    "/reservations/{reservationId}": {
+      "schema": { "$ref": "#/entities/reservation" },
+      "description": "Guild weekend hunt respawn public occupancy slots."
+    },
+    "/reservation_details/{reservationId}": {
+      "schema": { "$ref": "#/entities/reservationDetails" },
+      "description": "Private character and party details accessible only by owner or admins."
+    },
+    "/guild_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/guildSetting" },
+      "description": "Guild app configuration parameters."
+    }
+  }
+}
