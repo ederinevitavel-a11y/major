@@ -6,7 +6,8 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
 } from 'firebase/auth';
-import { auth, testConnection } from '../firebase/config';
+import { auth, testConnection, db } from '../firebase/config';
+import { doc, getDoc } from 'firebase/firestore';
 import { UserProfile } from '../types';
 import { getUserProfile, isEmailWhitelisted, saveUserProfile, updateUserPresence } from '../services/firestoreService';
 import { SUPER_ADMIN_EMAIL } from '../constants/guildData';
@@ -72,8 +73,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Whitelist check
     let authorized = isSuper;
+    let isEmailAdmin = isSuper;
     if (!authorized) {
       authorized = await isEmailWhitelisted(email);
+    }
+
+    try {
+      const emailDocSnap = await getDoc(doc(db, 'allowed_emails', encodeURIComponent(email)));
+      if (emailDocSnap.exists()) {
+        const data = emailDocSnap.data();
+        if (data.role === 'admin') {
+          isEmailAdmin = true;
+        }
+      }
+    } catch (err) {
+      console.warn('Check email admin role notice:', err);
     }
 
     setIsAuthorized(authorized);
@@ -98,14 +112,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             isAdmin: true,
           };
           saveUserProfile(profile).catch((err: unknown) => console.warn('Sync profile rank:', err));
+        } else if (isEmailAdmin && !profile.isAdmin) {
+          profile = {
+            ...profile,
+            isAdmin: true,
+          };
+          saveUserProfile(profile).catch((err: unknown) => console.warn('Sync profile admin:', err));
         }
         setUserProfile(profile);
-        setIsAdmin(isSuper || Boolean(profile.isAdmin));
+        setIsAdmin(isSuper || isEmailAdmin || Boolean(profile.isAdmin));
         setNeedsCharacterLink(false);
       } else {
         // Needs to link Tibia character
         setUserProfile(null);
-        setIsAdmin(isSuper);
+        setIsAdmin(isSuper || isEmailAdmin);
         setNeedsCharacterLink(true);
       }
     } catch (err) {

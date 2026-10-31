@@ -20,7 +20,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return isBootstrappedAdmin() ||
-        (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+        (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))) ||
+        (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true) ||
+        (isSignedIn() && request.auth.token.email != null && exists(/databases/$(database)/documents/allowed_emails/$(request.auth.token.email.lower())) && get(/databases/$(database)/documents/allowed_emails/$(request.auth.token.email.lower())).data.role == 'admin');
     }
 
     function isLeader() {
