@@ -14,8 +14,9 @@ import {
   deleteField,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
-import { AllowedEmail, Reservation, ReservationSlot, ReservationDetails, UserProfile, HuntDay, DoubleXpSettings, DoubleXpRecord } from '../types';
+import { AllowedEmail, Reservation, ReservationSlot, ReservationDetails, UserProfile, HuntDay, DoubleXpSettings, DoubleXpRecord, CustomRespawn, ReleasedRespawn, LfgPost } from '../types';
 import { SUPER_ADMIN_EMAIL } from '../constants/guildData';
+import { DEFAULT_FIXED_SCHEDULE } from '../constants/defaultSchedule';
 
 // ---- ALLOWED EMAILS ----
 export async function getAllowedEmails(): Promise<AllowedEmail[]> {
@@ -158,8 +159,8 @@ export async function updateUserPresence(uid: string, isOnline: boolean = true):
   }
 }
 
-// Helper: Determine if a user is currently online in the app (default heartbeat window: 150 seconds)
-export function isUserOnline(user: UserProfile | undefined | null, thresholdSeconds: number = 150): boolean {
+// Helper: Determine if a user is currently online in the app (default heartbeat window: 300 seconds / 5 minutes)
+export function isUserOnline(user: UserProfile | undefined | null, thresholdSeconds: number = 300): boolean {
   if (!user) return false;
   // If explicitly flagged offline
   if (user.isOnline === false) return false;
@@ -198,13 +199,35 @@ export function subscribeToReservations(
   let unsubDetails: Unsubscribe | null = null;
 
   const emit = () => {
-    const merged: Reservation[] = slotsList.map(slot => {
-      const detail = detailsMap.get(slot.id);
+    const getCleanName = (name: string) => (name || '').replace(/^[A-Z0-9]+\s*—\s*/, '');
+
+    const firestoreKeySet = new Set(
+      slotsList.flatMap(s => [
+        s.id,
+        `${s.day}_${getCleanName(s.respawnName)}_${s.timeSlot}`,
+        `${s.day}_${s.slotType}_${getCleanName(s.respawnName)}_${s.timeSlot}`,
+      ])
+    );
+
+    const fixedNotOverridden: Reservation[] = DEFAULT_FIXED_SCHEDULE.filter(
+      fixed =>
+        !firestoreKeySet.has(fixed.id) &&
+        !firestoreKeySet.has(`${fixed.day}_${getCleanName(fixed.respawnName)}_${fixed.timeSlot}`) &&
+        !firestoreKeySet.has(`${fixed.day}_${fixed.slotType}_${getCleanName(fixed.respawnName)}_${fixed.timeSlot}`)
+    ).map(fixed => ({
+      ...fixed,
+      partyMemberUids: [],
+    }));
+
+    const firestoreMerged: Reservation[] = slotsList.map(slot => {
       const isOwner = Boolean(currentUserUid && slot.userUid === currentUserUid);
-      const canSee = isAdmin || isOwner;
+      const detail = detailsMap.get(slot.id);
+      const canSee = isAdmin || isOwner || Boolean(detail);
 
       return {
         ...slot,
+        respawnName: getCleanName(slot.respawnName),
+        partyMemberUids: detail?.partyMemberUids || (slot as unknown as { partyMemberUids?: string[] }).partyMemberUids || [],
         // Strict Zero-Knowledge: regular members NEVER receive other players' character names, party, or notes!
         charName: canSee
           ? (detail?.charName || (slot as unknown as { charName?: string }).charName || '')
@@ -220,7 +243,20 @@ export function subscribeToReservations(
           : undefined,
       };
     });
-    callback(merged);
+
+    // Deduplicate merged list by unique key (day + respawn + timeSlot)
+    const seenKeys = new Set<string>();
+    const deduplicatedResult: Reservation[] = [];
+
+    for (const item of [...firestoreMerged, ...fixedNotOverridden]) {
+      const key = `${item.day}_${getCleanName(item.respawnName)}_${item.timeSlot}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduplicatedResult.push(item);
+      }
+    }
+
+    callback(deduplicatedResult);
   };
 
   // 1. Subscribe to public slot occupancy
@@ -256,24 +292,34 @@ export function subscribeToReservations(
       }
     );
   } else if (currentUserUid) {
-    // Regular member only queries and receives their OWN reservation details!
-    const userQuery = query(
-      collection(db, 'reservation_details'),
-      where('userUid', '==', currentUserUid)
-    );
-    unsubDetails = onSnapshot(
-      userQuery,
-      snapshot => {
-        detailsMap.clear();
-        snapshot.docs.forEach(d => {
-          detailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
-        });
-        emit();
-      },
-      error => {
-        console.warn('User reservation_details subscription:', error);
-      }
-    );
+    // Regular member queries own reservation details + reservation details shared with them
+    getAllUserProfiles().then(profiles => {
+      const sharedByUids = profiles
+        .filter(p => p.sharedWith && p.sharedWith.includes(currentUserUid))
+        .map(p => p.uid);
+      
+      const allowedUids = Array.from(new Set([currentUserUid, ...sharedByUids])).slice(0, 10);
+
+      const userQuery = query(
+        collection(db, 'reservation_details'),
+        where('userUid', 'in', allowedUids)
+      );
+      unsubDetails = onSnapshot(
+        userQuery,
+        snapshot => {
+          detailsMap.clear();
+          snapshot.docs.forEach(d => {
+            detailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
+          });
+          emit();
+        },
+        error => {
+          console.warn('User reservation_details subscription:', error);
+        }
+      );
+    }).catch(err => {
+      console.warn('Error fetching shared profiles for reservation details:', err);
+    });
   }
 
   return () => {
@@ -297,6 +343,7 @@ export async function setReservation(reservation: Reservation): Promise<void> {
       respawnName: reservation.respawnName,
       userUid: reservation.userUid,
       isOccupied: true,
+      partyMemberUids: reservation.partyMemberUids || [],
       reservedAt: reservation.reservedAt || new Date().toISOString(),
     };
 
@@ -307,6 +354,7 @@ export async function setReservation(reservation: Reservation): Promise<void> {
       userUid: reservation.userUid,
       userRank: reservation.userRank || 'Member',
       partyMembers: reservation.partyMembers || '',
+      partyMemberUids: reservation.partyMemberUids || [],
       notes: reservation.notes || '',
       createdAt: reservation.reservedAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -329,8 +377,13 @@ export async function deleteReservation(reservationId: string): Promise<void> {
     batch.delete(doc(db, 'reservation_details', reservationId));
     await batch.commit();
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-    throw error;
+    try {
+      await deleteDoc(doc(db, 'reservations', reservationId));
+      await deleteDoc(doc(db, 'reservation_details', reservationId));
+    } catch {
+      handleFirestoreError(error, OperationType.DELETE, path);
+      throw error;
+    }
   }
 }
 
@@ -499,6 +552,173 @@ export async function updateSystemStatus(status: { lastAutoSyncDate: string }): 
     console.warn('Update system status error:', err);
   }
 }
+
+// ---- CUSTOM RESPAWNS ----
+export async function getCustomRespawns(): Promise<CustomRespawn[]> {
+  const path = 'custom_respawns';
+  try {
+    const snap = await getDocs(collection(db, path));
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<CustomRespawn, 'id'>) }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+}
+
+export async function addCustomRespawn(name: string, type: 'normal' | '3h', addedBy: string): Promise<void> {
+  const cleanName = name.trim();
+  if (!cleanName) return;
+  const id = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  const path = `custom_respawns/${id}`;
+  try {
+    await setDoc(doc(db, 'custom_respawns', id), {
+      name: cleanName,
+      type,
+      addedBy,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function removeCustomRespawn(id: string): Promise<void> {
+  const path = `custom_respawns/${id}`;
+  try {
+    await deleteDoc(doc(db, 'custom_respawns', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeToCustomRespawns(
+  callback: (list: CustomRespawn[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const path = 'custom_respawns';
+  return onSnapshot(
+    collection(db, path),
+    snapshot => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as Omit<CustomRespawn, 'id'>) }));
+      callback(list);
+    },
+    error => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+// ---- RELEASED RESPAWNS ----
+export async function getReleasedRespawns(): Promise<ReleasedRespawn[]> {
+  const path = 'released_respawns';
+  try {
+    const snap = await getDocs(collection(db, path));
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<ReleasedRespawn, 'id'>) }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+}
+
+export async function addReleasedRespawn(data: Omit<ReleasedRespawn, 'id'>): Promise<void> {
+  const id = `${data.day}_${data.respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${data.timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}_${Date.now()}`;
+  const path = `released_respawns/${id}`;
+  try {
+    await setDoc(doc(db, 'released_respawns', id), {
+      ...data,
+      id,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteReleasedRespawn(releasedId: string): Promise<void> {
+  const path = `released_respawns/${releasedId}`;
+  try {
+    await deleteDoc(doc(db, 'released_respawns', releasedId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeToReleasedRespawns(
+  callback: (list: ReleasedRespawn[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const path = 'released_respawns';
+  return onSnapshot(
+    collection(db, path),
+    snapshot => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as Omit<ReleasedRespawn, 'id'>) }));
+      callback(list);
+    },
+    error => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+// ---- QUERO HUNT! (LFG POSTS) ----
+export async function getLfgPosts(): Promise<LfgPost[]> {
+  const path = 'lfg_posts';
+  try {
+    const snap = await getDocs(collection(db, path));
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<LfgPost, 'id'>) }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+}
+
+export async function saveLfgPost(post: LfgPost): Promise<void> {
+  const path = `lfg_posts/${post.id}`;
+  try {
+    const payload = cleanData({
+      ...post,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Record<string, unknown>);
+    await setDoc(doc(db, 'lfg_posts', post.id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function deleteLfgPost(postId: string): Promise<void> {
+  const path = `lfg_posts/${postId}`;
+  try {
+    await deleteDoc(doc(db, 'lfg_posts', postId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
+export function subscribeToLfgPosts(
+  callback: (list: LfgPost[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const path = 'lfg_posts';
+  return onSnapshot(
+    collection(db, path),
+    snapshot => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as Omit<LfgPost, 'id'>) }));
+      // Sort by newest updated
+      list.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+      callback(list);
+    },
+    error => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+
+
 
 
 

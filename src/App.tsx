@@ -5,6 +5,8 @@ import { StatsCards } from './components/StatsCards';
 import { ScheduleGrid } from './components/ScheduleGrid';
 import { AdminPanel } from './components/AdminPanel';
 import { MyReservations } from './components/MyReservations';
+import { ReleasedRespawnsTab } from './components/ReleasedRespawnsTab';
+import { QueroHuntTab } from './components/QueroHuntTab';
 import { FirstLoginModal } from './components/FirstLoginModal';
 import { ExportModal } from './components/ExportModal';
 import {
@@ -16,10 +18,13 @@ import {
   updateUserProfile,
   getDoubleXpRecord,
   saveDoubleXpRecord,
+  subscribeToCustomRespawns,
+  subscribeToReleasedRespawns,
+  subscribeToLfgPosts,
 } from './services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from './services/tibiaDataService';
 import { DEFAULT_GUILDS } from './constants/guildData';
-import { Reservation, UserProfile } from './types';
+import { Reservation, UserProfile, CustomRespawn, ReleasedRespawn, HuntDay, LfgPost, MainTab } from './types';
 import {
   Sparkles,
   Lock,
@@ -38,18 +43,19 @@ const MainDashboard: React.FC = () => {
     signOut,
   } = useAuth();
 
-  const [currentTab, setCurrentTab] = useState<'schedule' | 'my-schedule' | 'members' | 'settings'>('schedule');
+  const [currentTab, setCurrentTab] = useState<MainTab>('schedule');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [customRespawns, setCustomRespawns] = useState<CustomRespawn[]>([]);
+  const [releasedRespawns, setReleasedRespawns] = useState<ReleasedRespawn[]>([]);
+  const [lfgPosts, setLfgPosts] = useState<LfgPost[]>([]);
+  const [scheduleDay, setScheduleDay] = useState<HuntDay>('friday');
+  const [scheduleSearch, setScheduleSearch] = useState<string>('');
   const [isExportOpen, setIsExportOpen] = useState(false);
 
   // Security: Only administrators are authorized to fetch the full user profiles directory.
   // Regular members never receive other players' profiles or emails.
   const refreshUsers = async () => {
-    if (!isAdmin) {
-      setUsersList(userProfile ? [userProfile] : []);
-      return;
-    }
     try {
       const list = await getAllUserProfiles();
       setUsersList(list);
@@ -61,22 +67,45 @@ const MainDashboard: React.FC = () => {
   useEffect(() => {
     if (!currentUser || !isAuthorized) {
       setUsersList([]);
+      setCustomRespawns([]);
+      setReleasedRespawns([]);
+      setLfgPosts([]);
       return;
     }
 
-    if (isAdmin) {
-      // Real-time subscription to user profiles & live presence for administrators
-      const unsub = subscribeToUserProfiles(
-        list => {
-          setUsersList(list);
-        },
-        err => console.warn('Erro ao sincronizar membros online:', err)
-      );
-      return () => unsub();
-    } else if (userProfile) {
-      setUsersList([userProfile]);
-    }
-  }, [currentUser, isAuthorized, isAdmin, userProfile]);
+    // Real-time subscription to user profiles for all signed-in users (for party sharing)
+    const unsubUsers = subscribeToUserProfiles(
+      list => {
+        setUsersList(list);
+      },
+      err => console.warn('Erro ao sincronizar membros:', err)
+    );
+
+    // Real-time subscription to custom respawns
+    const unsubCustom = subscribeToCustomRespawns(
+      list => setCustomRespawns(list),
+      err => console.warn('Erro ao sincronizar custom respawns:', err)
+    );
+
+    // Real-time subscription to released respawns
+    const unsubReleased = subscribeToReleasedRespawns(
+      list => setReleasedRespawns(list),
+      err => console.warn('Erro ao sincronizar respaws liberados:', err)
+    );
+
+    // Real-time subscription to Quero Hunt (LFG) posts
+    const unsubLfg = subscribeToLfgPosts(
+      list => setLfgPosts(list),
+      err => console.warn('Erro ao sincronizar Quero Hunt:', err)
+    );
+
+    return () => {
+      unsubUsers();
+      unsubCustom();
+      unsubReleased();
+      unsubLfg();
+    };
+  }, [currentUser, isAuthorized]);
 
   // Automated daily 07:00 AM sync & XP capture check
   useEffect(() => {
@@ -347,8 +376,15 @@ const MainDashboard: React.FC = () => {
     <div className="min-h-screen bg-[#F7F9FC] dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 transition-colors">
       <Header
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
+        setCurrentTab={(tab) => {
+          if (tab === 'schedule') {
+            // keep or reset search
+          }
+          setCurrentTab(tab);
+        }}
         onOpenExport={() => setIsExportOpen(true)}
+        releasedCount={releasedRespawns.length}
+        lfgCount={lfgPosts.length}
       />
 
       <main className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5 overflow-x-hidden">
@@ -364,6 +400,30 @@ const MainDashboard: React.FC = () => {
           <ScheduleGrid
             reservations={reservations}
             usersList={usersList}
+            customRespawns={customRespawns}
+            initialDay={scheduleDay}
+            initialSearch={scheduleSearch}
+          />
+        )}
+
+        {/* Nova aba Quero Hunt! — cards de jogadores sem PT para a double */}
+        {currentTab === 'lfg' && (
+          <QueroHuntTab
+            posts={lfgPosts}
+            userProfile={userProfile}
+            onNavigateToMyControls={() => setCurrentTab('my-schedule')}
+          />
+        )}
+
+        {currentTab === 'released' && (
+          <ReleasedRespawnsTab
+            releasedList={releasedRespawns}
+            usersList={usersList}
+            onNavigateToSchedule={(day, respawnName) => {
+              if (day) setScheduleDay(day);
+              if (respawnName) setScheduleSearch(respawnName);
+              setCurrentTab('schedule');
+            }}
           />
         )}
 
@@ -371,6 +431,10 @@ const MainDashboard: React.FC = () => {
           <MyReservations
             reservations={reservations}
             userProfile={userProfile}
+            usersList={usersList}
+            onUpdateProfile={refreshUsers}
+            lfgPosts={lfgPosts}
+            onNavigateToLfg={() => setCurrentTab('lfg')}
           />
         )}
 
@@ -379,6 +443,7 @@ const MainDashboard: React.FC = () => {
             usersList={usersList}
             reservations={reservations}
             onRefreshUsers={refreshUsers}
+            customRespawns={customRespawns}
           />
         )}
       </main>

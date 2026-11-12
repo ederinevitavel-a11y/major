@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AllowedEmail, PriorityRank, UserProfile, Reservation, HuntDay, DoubleXpSettings, DoubleXpRecord } from '../types';
+import { AllowedEmail, PriorityRank, UserProfile, Reservation, HuntDay, CustomRespawn, ReleasedRespawn } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
   getAllowedEmails,
@@ -7,12 +7,13 @@ import {
   removeAllowedEmail,
   updateUserProfile,
   isUserOnline,
-  getDoubleXpSettings,
-  saveDoubleXpSettings,
-  getAllDoubleXpRecords,
-  saveDoubleXpRecord,
+  addCustomRespawn,
+  removeCustomRespawn,
+  subscribeToReleasedRespawns,
+  deleteReservation,
 } from '../services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from '../services/tibiaDataService';
+import { fetchGuildHighscores, fetchCharacterHighscores, fetchMissclickMembers } from '../services/missclickApi';
 import { PRIORITY_RANKS, RANK_METADATA, DEFAULT_GUILDS, SUPER_ADMIN_EMAIL, DAYS_CONFIG } from '../constants/guildData';
 import { ResetScheduleModal } from './ResetScheduleModal';
 import { AdminAssignModal } from './AdminAssignModal';
@@ -39,28 +40,59 @@ import {
   Wifi,
   WifiOff,
   Zap,
+  EyeOff,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { ExportModal } from './ExportModal';
 
 interface AdminPanelProps {
   usersList: UserProfile[];
   reservations: Reservation[];
   onRefreshUsers: () => Promise<void>;
+  customRespawns?: CustomRespawn[];
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   usersList,
   reservations,
   onRefreshUsers,
+  customRespawns = [],
 }) => {
   const { currentUser } = useAuth();
-  const [activeSubTab, setActiveSubTab] = useState<'assign' | 'members' | 'emails' | 'schedule' | 'guilds' | 'double-xp'>('assign');
+  const [activeSubTab, setActiveSubTab] = useState<'assign' | 'emails' | 'apis' | 'released'>('assign');
+  const [releasedRespawnsList, setReleasedRespawnsList] = useState<ReleasedRespawn[]>([]);
+  const [isExcelBackupOpen, setIsExcelBackupOpen] = useState(false);
+
+  useEffect(() => {
+    const unsub = subscribeToReleasedRespawns(list => {
+      setReleasedRespawnsList(list);
+    });
+    return () => unsub();
+  }, []);
+
+  const [guildHighscoresData, setGuildHighscoresData] = useState<any>(null);
+  const [loadingGuildHs, setLoadingGuildHs] = useState(false);
+
+  const loadGuildHighscores = async () => {
+    setLoadingGuildHs(true);
+    try {
+      const data = await fetchGuildHighscores();
+      setGuildHighscoresData(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingGuildHs(false);
+    }
+  };
+
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [resetModalDay, setResetModalDay] = useState<HuntDay>('friday');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Dedicated Rank Filter State
   const [selectedRank, setSelectedRank] = useState<'all' | PriorityRank>('all');
-  const [filterOnlineOnly, setFilterOnlineOnly] = useState<boolean>(true);
+  const [filterOnlineOnly, setFilterOnlineOnly] = useState<boolean>(false);
+  const [hiddenPlayerUids, setHiddenPlayerUids] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Assign Respawn Modal State
@@ -73,12 +105,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newNote, setNewNote] = useState('');
   const [loadingEmails, setLoadingEmails] = useState(false);
 
-  // Double XP State
-  const [doubleStartDate, setDoubleStartDate] = useState('');
-  const [doubleEndDate, setDoubleEndDate] = useState('');
-  const [doubleRecordsList, setDoubleRecordsList] = useState<DoubleXpRecord[]>([]);
-  const [savingDoubleSettings, setSavingDoubleSettings] = useState(false);
-  const [capturingXp, setCapturingXp] = useState(false);
+  // Custom respawn management state
+  const [newHuntName, setNewHuntName] = useState('');
+  const [newHuntType, setNewHuntType] = useState<'normal' | '3h'>('normal');
+  const [addingHunt, setAddingHunt] = useState(false);
+
+  const handleAddHunt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newHuntName.trim()) return;
+    setAddingHunt(true);
+    try {
+      await addCustomRespawn(newHuntName.trim(), newHuntType, currentUser?.email || 'admin');
+      setNewHuntName('');
+      setToastMessage(`Hunt "${newHuntName.trim()}" adicionada com sucesso!`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } catch (err) {
+      console.error(err);
+      setToastMessage('Erro ao adicionar hunt.');
+    } finally {
+      setAddingHunt(false);
+    }
+  };
+
+  const handleDeleteHunt = async (id: string, name: string) => {
+    if (!window.confirm(`Remover a hunt "${name}" da lista?`)) return;
+    try {
+      await removeCustomRespawn(id);
+      setToastMessage(`Hunt "${name}" removida com sucesso.`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } catch (err) {
+      console.error(err);
+      setToastMessage('Erro ao remover hunt.');
+    }
+  };
+
   const [syncingLevels, setSyncingLevels] = useState(false);
 
   const handleSyncAllLevels = async () => {
@@ -173,73 +233,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  const loadDoubleData = async () => {
-    try {
-      const settings = await getDoubleXpSettings();
-      if (settings) {
-        setDoubleStartDate(settings.startDate || '');
-        setDoubleEndDate(settings.endDate || '');
-      }
-      const records = await getAllDoubleXpRecords();
-      setDoubleRecordsList(records);
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
-  const handleSaveDoubleSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingDoubleSettings(true);
-    try {
-      await saveDoubleXpSettings({
-        startDate: doubleStartDate,
-        endDate: doubleEndDate,
-      });
-      setToastMessage('Período da Double XP salvo com sucesso!');
-      setTimeout(() => setToastMessage(null), 4000);
-    } catch (err) {
-      console.error(err);
-      setToastMessage('Falha ao salvar período da Double XP.');
-    } finally {
-      setSavingDoubleSettings(false);
-    }
-  };
-
-  const handleCaptureAllXp = async () => {
-    setCapturingXp(true);
-    try {
-      let updatedCount = 0;
-      for (const u of usersList) {
-        if (!u.charName) continue;
-        const charInfo = await fetchCharacter(u.charName);
-        if (charInfo) {
-          const currentTotal = charInfo.experience;
-          const existing = doubleRecordsList.find(r => r.uid === u.uid);
-          const perDay = Math.floor(currentTotal / 3);
-          const record: DoubleXpRecord = {
-            uid: u.uid,
-            charName: u.charName,
-            startExp: existing?.startExp ?? currentTotal,
-            fridayExp: existing?.fridayExp ?? perDay,
-            saturdayExp: existing?.saturdayExp ?? perDay,
-            sundayExp: existing?.sundayExp ?? (currentTotal - perDay * 2),
-            totalExp: currentTotal,
-            lastCapturedAt: new Date().toISOString(),
-          };
-          await saveDoubleXpRecord(record);
-          updatedCount++;
-        }
-      }
-      await loadDoubleData();
-      setToastMessage(`Experiência capturada com sucesso para ${updatedCount} personagem(ns)!`);
-      setTimeout(() => setToastMessage(null), 5000);
-    } catch (err) {
-      console.error(err);
-      setToastMessage('Erro ao capturar experiência dos jogadores.');
-    } finally {
-      setCapturingXp(false);
-    }
-  };
 
   const checkGuilds = async () => {
     const results = await Promise.all(
@@ -263,7 +257,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   useEffect(() => {
     loadEmails();
     checkGuilds();
-    loadDoubleData();
   }, []);
 
   // Online status helper: consider current user session online
@@ -306,6 +299,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         if (filterOnlineOnly && !online) return false;
         if (selectedRank !== 'all' && u.rank !== selectedRank) return false;
 
+        if (hiddenPlayerUids.includes(u.uid)) return false;
+
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
           const matchName = u.charName.toLowerCase().includes(q);
@@ -326,7 +321,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         if (rankIndexA !== rankIndexB) return rankIndexA - rankIndexB;
         return a.charName.localeCompare(b.charName);
       });
-  }, [usersList, selectedRank, filterOnlineOnly, searchQuery, currentUser]);
+  }, [usersList, selectedRank, filterOnlineOnly, hiddenPlayerUids, searchQuery, currentUser]);
 
   const handleAddEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -436,14 +431,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl overflow-x-auto">
             <button
               onClick={() => setActiveSubTab('assign')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                 activeSubTab === 'assign'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Target className="h-3.5 w-3.5" />
-              <span>Atribuir por Rank</span>
+              <span>Cadastrar Respawns</span>
               <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
                 activeSubTab === 'assign' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
               }`}>
@@ -452,61 +447,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveSubTab('members')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeSubTab === 'members'
-                  ? 'bg-white text-blue-600 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Users className="h-3.5 w-3.5" />
-              <span>Vínculos ({usersList.length})</span>
-            </button>
-
-            <button
               onClick={() => setActiveSubTab('emails')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                 activeSubTab === 'emails'
                   ? 'bg-white text-blue-600 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <span>E-mails ({allowedEmails.length})</span>
+              <span>E-mails Autorizados ({allowedEmails.length})</span>
             </button>
 
             <button
-              onClick={() => setActiveSubTab('schedule')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeSubTab === 'schedule'
-                  ? 'bg-white text-rose-600 dark:bg-slate-900 dark:text-rose-400 shadow-xs'
+              onClick={() => {
+                setActiveSubTab('apis');
+                if (!guildHighscoresData) loadGuildHighscores();
+              }}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'apis'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>Zerar Respawns</span>
+              <Zap className="h-3.5 w-3.5" />
+              <span>APIs</span>
             </button>
 
             <button
-              onClick={() => setActiveSubTab('guilds')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeSubTab === 'guilds'
-                  ? 'bg-white text-blue-600 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
+              onClick={() => setActiveSubTab('released')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'released'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <span>APIs Guildas</span>
-            </button>
-
-            <button
-              onClick={() => setActiveSubTab('double-xp')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeSubTab === 'double-xp'
-                  ? 'bg-white text-blue-600 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Zap className="h-3.5 w-3.5 text-amber-500" />
-              <span>Double XP</span>
+              <Zap className="h-3.5 w-3.5" />
+              <span>Respaws Liberados ({releasedRespawnsList.length})</span>
             </button>
           </div>
         </div>
@@ -654,6 +629,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </span>
             </div>
 
+            {hiddenPlayerUids.length > 0 && (
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border-b border-blue-100 dark:border-blue-900/60 flex items-center justify-between text-xs text-blue-800 dark:text-blue-300">
+                <span>Você ocultou <strong>{hiddenPlayerUids.length}</strong> jogador(es) desta lista.</span>
+                <button
+                  type="button"
+                  onClick={() => setHiddenPlayerUids([])}
+                  className="font-bold underline hover:text-blue-900 dark:hover:text-blue-200 cursor-pointer"
+                >
+                  Exibir novamente
+                </button>
+              </div>
+            )}
+
             {filteredUsers.length === 0 ? (
               <div className="p-10 text-center">
                 <div className="mx-auto h-12 w-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-3">
@@ -759,13 +747,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               userBookings.map(b => (
                                 <span
                                   key={b.id}
-                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60"
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60"
                                 >
                                   <span className="uppercase font-extrabold">
                                     {b.day === 'friday' ? 'SEX' : b.day === 'saturday' ? 'SÁB' : 'DOM'}
                                   </span>
                                   <span>{b.respawnName}</span>
                                   <span className="font-mono text-slate-500 dark:text-slate-400">({b.timeSlot})</span>
+                                  <button
+                                    type="button"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        await deleteReservation(b.id);
+                                        setToastMessage(`Marcação de ${b.respawnName} (${b.timeSlot}) excluída.`);
+                                        setTimeout(() => setToastMessage(null), 4000);
+                                      } catch (err) {
+                                        console.error(err);
+                                      }
+                                    }}
+                                    className="p-0.5 rounded hover:bg-rose-100 dark:hover:bg-rose-950 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
+                                    title="Excluir esta marcação imediatamente"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
                                 </span>
                               ))
                             )}
@@ -773,8 +778,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </div>
                       </div>
 
-                      {/* Right: Action button */}
+                      {/* Right: Action buttons */}
                       <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(user)}
+                          className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
+                          title="Editar rank ou nome do personagem"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                          <span>Editar</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHiddenPlayerUids(prev => 
+                              prev.includes(user.uid) ? prev : [...prev, user.uid]
+                            );
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
+                          title="Ocultar jogador da lista após marcar os respawns"
+                        >
+                          <EyeOff className="h-3.5 w-3.5" />
+                          <span>Ocultar</span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => setAssignUser(user)}
@@ -793,132 +822,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* SUB-TAB 2: MEMBERS & VINCULOS MANAGEMENT                 */}
-      {/* ======================================================== */}
-      {activeSubTab === 'members' && (
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Vínculos de Personagens Registrados
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Altere ranks, corrija nomes de char ou conceda privilégios de liderança.
-              </p>
-            </div>
-            <div className="relative w-full sm:w-72">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Buscar membro ou rank..."
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-1.5 pl-8 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
-            </div>
-          </div>
 
-          <div className="overflow-x-auto mt-4">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 uppercase font-bold text-[10px]">
-                  <th className="p-3">Personagem</th>
-                  <th className="p-3">E-mail Google</th>
-                  <th className="p-3">Guilda</th>
-                  <th className="p-3">Rank de Prioridade</th>
-                  <th className="p-3">Level / Vocação</th>
-                  <th className="p-3">Admin</th>
-                  <th className="p-3 text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                {filteredUsers.map(u => {
-                  const online = isOnlineHelper(u);
-                  return (
-                    <tr key={u.uid} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`h-2 w-2 rounded-full shrink-0 ${
-                              online
-                                ? 'bg-emerald-500 shadow-xs shadow-emerald-500/50 animate-pulse'
-                                : 'bg-slate-300 dark:bg-slate-600'
-                            }`}
-                            title={online ? 'Online no aplicativo agora' : 'Offline no momento'}
-                          />
-                          <strong className="text-slate-900 dark:text-white block font-bold">
-                            {u.charName}
-                          </strong>
-                          {online && (
-                            <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 px-1.5 py-0.2 rounded-full">
-                              Online
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-3 text-slate-600 dark:text-slate-400">
-                        {u.email}
-                        {u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() && (
-                          <span className="ml-1 text-[9px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.2 rounded">
-                            Major
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3 font-semibold text-blue-600 dark:text-blue-400">
-                        {u.guildName}
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-extrabold border ${
-                            RANK_METADATA[u.rank]?.badgeClass || ''
-                          }`}
-                        >
-                          {u.rank}
-                        </span>
-                      </td>
-                      <td className="p-3 text-slate-600 dark:text-slate-400">
-                        Lv {u.level} • {u.vocation}
-                      </td>
-                      <td className="p-3">
-                        {u.isAdmin ? (
-                          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded">
-                            Sim
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-slate-400">Não</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setAssignUser(u)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
-                            title="Atribuir respawn diretamente"
-                          >
-                            <Target className="h-3.5 w-3.5" />
-                            <span className="text-[11px] font-bold">Atribuir</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(u)}
-                            className="inline-flex items-center gap-1 p-1 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
-                            title="Editar vínculo"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                            <span className="text-[11px] font-semibold">Editar</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* ======================================================== */}
       {/* SUB-TAB 3: ALLOWED EMAILS                                */}
@@ -1032,107 +936,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       )}
 
       {/* ======================================================== */}
-      {/* SUB-TAB 4: GUILD APIS DIAGNOSTICS                        */}
+      {/* SUB-TAB: APIS & MAINTENANCE                              */}
       {/* ======================================================== */}
-      {activeSubTab === 'guilds' && (
+      {activeSubTab === 'apis' && (
         <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Sincronização de Leveis e Vocações (API TibiaData)
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Atualize instantaneamente o level e a vocação de todos os personagens cadastrados consultando a API oficial do Tibia.
-              </p>
-            </div>
-            <button
-              onClick={handleSyncAllLevels}
-              disabled={syncingLevels}
-              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/25 disabled:opacity-50 cursor-pointer whitespace-nowrap"
-            >
-              {syncingLevels ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              <span>Sincronizar Leveis de Todos Agora</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {guildDiagnostics.map(diag => (
-            <div
-              key={diag.guildName}
-              className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors"
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 font-bold">
-                    {diag.guildName[0]}
-                  </span>
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Guilda {diag.guildName}
-                    </h4>
-                    <span className="text-[10px] text-slate-400">TibiaData API v4</span>
-                  </div>
-                </div>
-
-                <span
-                  className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                    diag.status === 'online'
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                      : diag.status === 'checking'
-                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                      : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
-                  }`}
-                >
-                  <span
-                    className={`h-2 w-2 rounded-full ${
-                      diag.status === 'online' ? 'bg-emerald-500' : 'bg-rose-500'
-                    }`}
-                  />
-                  {diag.status === 'online' ? 'Conectado' : diag.status === 'checking' ? 'Testando...' : 'Erro'}
+          {/* Excel Backup Box for Admins */}
+          <div className="rounded-2xl border border-emerald-200/90 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-6 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-500/25 shrink-0">
+                  <FileSpreadsheet className="h-5 w-5" />
                 </span>
-              </div>
-
-              <div className="mt-4 space-y-2 text-xs">
-                <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                  <span>Endpoint Oficial:</span>
-                  <a
-                    href={`https://api.tibiadata.com/v4/guild/${diag.guildName}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                  >
-                    api.tibiadata.com/v4/guild/{diag.guildName}
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-                <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                  <span>Membros Ativos Carregados:</span>
-                  <strong className="text-slate-900 dark:text-white font-bold">{diag.total} membros</strong>
-                </div>
-                <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                  <span>Tempo de Cache Local:</span>
-                  <span>15 minutos (resiliência a rate limit)</span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Salvar Backup da Escala em Excel (.xls)
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl leading-relaxed">
+                    Baixe e garanta a segurança das informações de marcações de respawns em uma planilha Excel completa (incluindo todos os dias, horários, personagens, ranks, party members e observações).
+                  </p>
                 </div>
               </div>
 
               <button
-                onClick={checkGuilds}
-                className="mt-4 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                onClick={() => setIsExcelBackupOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-md shadow-emerald-500/20 transition-all cursor-pointer whitespace-nowrap self-start md:self-auto shrink-0"
               >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Atualizar Dados da Guilda
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Salvar em Excel</span>
               </button>
             </div>
-          ))}
-        </div>
-      </div>
-      )}
+          </div>
 
-      {/* ======================================================== */}
-      {/* SUB-TAB 5: GESTÃO & MASTER RESET DE RESPAWNS             */}
-      {/* ======================================================== */}
-      {activeSubTab === 'schedule' && (
-        <div className="space-y-6">
           {/* Master Reset Box */}
           <div className="rounded-2xl border border-rose-200/90 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20 p-6 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1145,7 +979,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     Reiniciar Escala & Liberar Todos os Respawns
                   </h3>
                   <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl leading-relaxed">
-                    Ideal para o início de novos finais de semana ou encerramento de eventos de Double. Você pode zerar a grade inteira ou apenas o dia que desejar. Todos os slots voltam imediatamente para o status <strong>Livre</strong>.
+                    Ideal para o início de novos finais de semana ou encerramento de eventos. Você pode zerar a grade inteira ou apenas o dia que desejar. Todos os slots voltam imediatamente para o status <strong>Livre</strong>.
                   </p>
                 </div>
               </div>
@@ -1161,6 +995,81 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <span>Reiniciar Respawns</span>
               </button>
             </div>
+          </div>
+
+          {/* Custom Respawns / Manual Hunts Management Card */}
+          <div className="rounded-2xl border border-slate-200/95 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Incluir / Gerenciar Hunts Manualmente
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Adicione novas hunts ou respawns personalizados que aparecerão imediatamente na grade da guilda.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleAddHunt} className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="text"
+                value={newHuntName}
+                onChange={e => setNewHuntName(e.target.value)}
+                placeholder="Nome da Hunt (Ex: Deeper Banuta)"
+                required
+                className="flex-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-white"
+              />
+
+              <select
+                value={newHuntType}
+                onChange={e => setNewHuntType(e.target.value as 'normal' | '3h')}
+                className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white"
+              >
+                <option value="normal">Normal (2h)</option>
+                <option value="3h">Especial (3h)</option>
+              </select>
+
+              <button
+                type="submit"
+                disabled={addingHunt}
+                className="inline-flex items-center justify-center gap-1.5 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+              >
+                {addingHunt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                <span>Adicionar Hunt</span>
+              </button>
+            </form>
+
+            {/* List of custom hunts */}
+            {customRespawns && customRespawns.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                  Hunts Personalizadas Cadastradas ({customRespawns.length}):
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {customRespawns.map(hunt => (
+                    <div
+                      key={hunt.id}
+                      className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 text-xs"
+                    >
+                      <div>
+                        <strong className="text-slate-900 dark:text-white block">{hunt.name}</strong>
+                        <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">
+                          {hunt.type === '3h' ? 'Especial 3h' : 'Normal (2h)'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteHunt(hunt.id, hunt.name)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                        title="Remover hunt"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Breakdown by Day Cards */}
@@ -1207,8 +1116,245 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               );
             })}
           </div>
+
+          {/* TibiaData Sync Section */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Sincronização de Leveis e Vocações (API TibiaData)
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Atualize instantaneamente o level e a vocação de todos os personagens cadastrados consultando a API oficial do Tibia.
+              </p>
+            </div>
+            <button
+              onClick={handleSyncAllLevels}
+              disabled={syncingLevels}
+              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/25 disabled:opacity-50 cursor-pointer whitespace-nowrap"
+            >
+              {syncingLevels ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              <span>Sincronizar Leveis de Todos Agora</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {guildDiagnostics.map(diag => (
+              <div
+                key={diag.guildName}
+                className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 font-bold">
+                      {diag.guildName[0]}
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                        Guilda {diag.guildName}
+                      </h4>
+                      <span className="text-[10px] text-slate-400">TibiaData API v4</span>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                      diag.status === 'online'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : diag.status === 'checking'
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                        : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                    }`}
+                  >
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        diag.status === 'online' ? 'bg-emerald-500' : 'bg-rose-500'
+                      }`}
+                    />
+                    {diag.status === 'online' ? 'Conectado' : diag.status === 'checking' ? 'Testando...' : 'Erro'}
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-2 text-xs">
+                  <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                    <span>Endpoint Oficial:</span>
+                    <a
+                      href={`https://api.tibiadata.com/v4/guild/${diag.guildName}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                    >
+                      api.tibiadata.com/v4/guild/{diag.guildName}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                  <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                    <span>Membros Ativos Carregados:</span>
+                    <strong className="text-slate-900 dark:text-white font-bold">{diag.total} membros</strong>
+                  </div>
+                </div>
+
+                <button
+                  onClick={checkGuilds}
+                  className="mt-4 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Atualizar Dados da Guilda
+                </button>
+              </div>
+            ))}
+          </div>
+
+
+      {/* Guild Highscores Summary Card */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md">
+                <Zap className="h-5 w-5" />
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Missclick
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Dados oficiais de experiência dos jogadores obtidos diretamente da API.
+                </p>
+              </div>
+            </div>
+
+              <button
+                type="button"
+                onClick={loadGuildHighscores}
+                disabled={loadingGuildHs}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {loadingGuildHs ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                <span>Atualizar Experiência dos Jogadores</span>
+              </button>
+            </div>
+
+            {loadingGuildHs ? (
+              <div className="py-12 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                <span>Carregando experiência dos jogadores da guilda...</span>
+              </div>
+            ) : guildHighscoresData ? (
+              <div className="space-y-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold text-slate-400">
+                        <th className="py-2.5 px-3">Jogador</th>
+                        <th className="py-2.5 px-3">Nível</th>
+                        <th className="py-2.5 px-3">Vocação</th>
+                        <th className="py-2.5 px-3 text-right">Experiência / Exp Yesterday</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
+                      {(() => {
+                        const players = Array.isArray(guildHighscoresData)
+                          ? guildHighscoresData
+                          : (guildHighscoresData.members || guildHighscoresData.players || guildHighscoresData.highscores || []);
+
+                        if (players.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={4} className="py-6 text-center text-slate-400 font-sans">
+                                <pre className="p-3 text-[11px] text-left overflow-auto max-h-60 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                                  {JSON.stringify(guildHighscoresData, null, 2)}
+                                </pre>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return players.map((p: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                            <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white font-sans">{p.name || p.charName || `Jogador #${idx+1}`}</td>
+                            <td className="py-2.5 px-3">{p.level || p.value || 'N/D'}</td>
+                            <td className="py-2.5 px-3 text-blue-600 dark:text-blue-400 font-sans">{p.vocation || 'N/D'}</td>
+                            <td className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 font-black">
+                              {(p.expYesterday ?? p.experience ?? p.exp ?? p.value ?? 0).toLocaleString('pt-BR')} XP
+                            </td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-xs text-slate-400">
+                Clique em "Atualizar Experiência dos Jogadores" para carregar os dados da API.
+              </div>
+            )}
+          </div>
         </div>
       )}
+
+      {/* ======================================================== */}
+      {/* SUB-TAB: RELEASED RESPAWNS LIST                          */}
+      {/* ======================================================== */}
+      {activeSubTab === 'released' && (
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Lista de Jogadores que Liberaram Respawns durante a Double
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Histórico completo de horários liberados pelos membros para alocação antecipada.
+              </p>
+            </div>
+            <span className="px-3 py-1 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-xs font-bold">
+              {releasedRespawnsList.length} Liberação(ões)
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
+                  <th className="p-3">Jogador / Personagem</th>
+                  <th className="p-3">Dia</th>
+                  <th className="p-3">Respawn</th>
+                  <th className="p-3">Horário</th>
+                  <th className="p-3 text-right">Data / Hora da Liberação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {releasedRespawnsList.map(item => (
+                  <tr key={item.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                    <td className="p-3 font-black text-slate-900 dark:text-white">
+                      {item.charName}
+                    </td>
+                    <td className="p-3 font-bold uppercase text-blue-600 dark:text-blue-400">
+                      {item.day === 'friday' ? 'Sexta-feira' : item.day === 'saturday' ? 'Sábado' : 'Domingo'}
+                    </td>
+                    <td className="p-3 font-bold text-slate-800 dark:text-slate-200">
+                      {item.respawnName}
+                    </td>
+                    <td className="p-3 font-mono text-xs text-emerald-600 dark:text-emerald-400">
+                      {item.timeSlot}
+                    </td>
+                    <td className="p-3 text-right text-slate-400 font-mono text-[11px]">
+                      {new Date(item.releasedAt).toLocaleString('pt-BR')}
+                    </td>
+                  </tr>
+                ))}
+                {releasedRespawnsList.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-10 text-center text-slate-400 italic">
+                      Nenhum respawn foi liberado pelos jogadores até o momento.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
 
       {/* Edit User Modal */}
       {editingUser && (
@@ -1286,123 +1432,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* SUB-TAB: DOUBLE XP & EXPERIENCE CAPTURE                   */}
-      {/* ======================================================== */}
-      {activeSubTab === 'double-xp' && (
-        <div className="space-y-6">
-          <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
-                  <Zap className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 dark:text-white">
-                    Configuração de Período da Double Experiência
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Defina a data de início e fim da double para capturar e gravar o progresso de todos os jogadores.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleCaptureAllXp}
-                disabled={capturingXp}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/25 disabled:opacity-50 cursor-pointer whitespace-nowrap"
-              >
-                {capturingXp ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                <span>Capturar XP de Todos via API</span>
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveDoubleSettings} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Data Início da Double
-                </label>
-                <input
-                  type="date"
-                  value={doubleStartDate}
-                  onChange={e => setDoubleStartDate(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-slate-900 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Data Fim da Double
-                </label>
-                <input
-                  type="date"
-                  value={doubleEndDate}
-                  onChange={e => setDoubleEndDate(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-slate-900 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <button
-                  type="submit"
-                  disabled={savingDoubleSettings}
-                  className="w-full py-2.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-bold border border-slate-700 shadow-sm cursor-pointer"
-                >
-                  {savingDoubleSettings ? 'Salvando...' : 'Salvar Período'}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Players XP Records Table */}
-          <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
-            <h3 className="text-base font-black text-slate-900 dark:text-white">
-              Progresso de Experiência dos Jogadores (Sexta, Sábado e Domingo)
-            </h3>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 font-bold">
-                    <th className="pb-3 px-3">Personagem</th>
-                    <th className="pb-3 px-3">Sexta (XP)</th>
-                    <th className="pb-3 px-3">Sábado (XP)</th>
-                    <th className="pb-3 px-3">Domingo (XP)</th>
-                    <th className="pb-3 px-3">Total Acumulado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {usersList.map(u => {
-                    const rec = doubleRecordsList.find(r => r.uid === u.uid);
-                    return (
-                      <tr key={u.uid} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">
-                          {u.charName || 'Sem Personagem'}
-                          <div className="text-[10px] text-slate-400 font-normal">{u.email}</div>
-                        </td>
-                        <td className="py-3 px-3 font-mono text-slate-600 dark:text-slate-300">
-                          {rec?.fridayExp ? rec.fridayExp.toLocaleString('pt-BR') : '0'}
-                        </td>
-                        <td className="py-3 px-3 font-mono text-slate-600 dark:text-slate-300">
-                          {rec?.saturdayExp ? rec.saturdayExp.toLocaleString('pt-BR') : '0'}
-                        </td>
-                        <td className="py-3 px-3 font-mono text-slate-600 dark:text-slate-300">
-                          {rec?.sundayExp ? rec.sundayExp.toLocaleString('pt-BR') : '0'}
-                        </td>
-                        <td className="py-3 px-3 font-bold text-blue-600 dark:text-blue-400 font-mono">
-                          {rec?.totalExp ? rec.totalExp.toLocaleString('pt-BR') : '0'} XP
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Admin Respawn Assignment Modal */}
       {assignUser && (
         <AdminAssignModal
@@ -1430,6 +1459,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             );
             setTimeout(() => setToastMessage(null), 6000);
           }}
+        />
+      )}
+
+      {/* Admin Excel Backup Export Modal */}
+      {isExcelBackupOpen && (
+        <ExportModal
+          reservations={reservations}
+          onClose={() => setIsExcelBackupOpen(false)}
         />
       )}
     </div>

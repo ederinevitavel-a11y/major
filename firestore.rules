@@ -14,7 +14,7 @@ service cloud.firestore {
 
     function isBootstrappedAdmin() {
       return isSignedIn() &&
-        request.auth.token.email == 'ederinevitavel@gmail.com' &&
+        (request.auth.token.email == 'ederinevitavel@gmail.com' || request.auth.token.email == 'admissclick@gmail.com') &&
         request.auth.token.email_verified == true;
     }
 
@@ -59,12 +59,9 @@ service cloud.firestore {
       allow write: if isAdmin() && isValidId(emailId);
     }
 
-    // User profiles - PII ISOLATION
-    // Regular members can ONLY read their own profile document.
-    // Non-admins are strictly forbidden from listing the users collection.
+    // User profiles - Allow signed-in users to read/list profiles for party selection
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdmin();
-      allow list: if isAdmin();
+      allow get, list: if isSignedIn();
       allow create: if isSignedIn() &&
         isValidId(userId) &&
         (request.auth.uid == userId || isAdmin()) &&
@@ -86,32 +83,84 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
         isValidId(reservationId) &&
         (isAdmin() || (isLeader() && resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid));
-      allow delete: if isSignedIn() &&
-        (isAdmin() || resource.data.userUid == request.auth.uid);
+      allow delete: if isSignedIn() && (
+        isAdmin() || 
+        resource == null || 
+        resource.data.userUid == request.auth.uid ||
+        (exists(/databases/$(database)/documents/reservation_details/$(reservationId)) && 
+         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/reservation_details/$(reservationId)).data.charName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.charName)
+      );
     }
 
     // Sensitive Reservation Details (Character Name, Party Members, Notes)
     // STRICT ZERO-KNOWLEDGE BOUNDARY:
-    // Regular members can ONLY read and write their OWN reservation details.
-    // Administrators can access all records to supervise the guild schedule.
-    // Restriction: Only Admin or players with Leader rank can create or update reservation details.
+    // Members can read own reservation details or records shared via sharedWith array in user profile.
     match /reservation_details/{reservationId} {
-      allow get: if isAdmin() || (isSignedIn() && resource.data.userUid == request.auth.uid);
-      allow list: if isAdmin() || (isSignedIn() && resource.data.userUid == request.auth.uid);
+      allow get, list: if isSignedIn() && (
+        isAdmin() || 
+        resource.data.userUid == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(resource.data.userUid)) && 
+         request.auth.uid in get(/databases/$(database)/documents/users/$(resource.data.userUid)).data.get('sharedWith', []))
+      );
       allow create: if isSignedIn() &&
         isValidId(reservationId) &&
         (isAdmin() || (isLeader() && request.resource.data.userUid == request.auth.uid));
       allow update: if isSignedIn() &&
         isValidId(reservationId) &&
         (isAdmin() || (isLeader() && resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid));
-      allow delete: if isSignedIn() &&
-        (isAdmin() || resource.data.userUid == request.auth.uid);
+      allow delete: if isSignedIn() && (
+        isAdmin() || 
+        resource == null || 
+        resource.data.userUid == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         resource.data.charName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.charName)
+      );
+    }
+
+    // Global Settings (e.g. double_xp, system_status)
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidId(settingId);
+    }
+
+    // Double XP Records
+    match /double_xp_records/{recordId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isAdmin() || request.auth.uid == recordId);
     }
 
     // Global Guild Settings & Public non-PII Statistics
     match /guild_settings/{settingId} {
       allow read: if isSignedIn();
       allow write: if isAdmin() && isValidId(settingId);
+    }
+
+    // Custom Respawns (Manual Hunts added by Admin)
+    match /custom_respawns/{respawnId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidId(respawnId);
+    }
+
+    // Released Respawns - Respawns voluntarily freed up by players so others can claim them early
+    match /released_respawns/{releasedId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(releasedId);
+      allow update: if isAdmin();
+      allow delete: if isSignedIn();
+    }
+
+    // Quero Hunt! (LFG Posts - Players looking for party for double exp)
+    match /lfg_posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        isValidId(postId) &&
+        (request.resource.data.userUid == request.auth.uid || isAdmin());
+      allow update: if isSignedIn() &&
+        isValidId(postId) &&
+        (resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid || isAdmin());
+      allow delete: if isSignedIn() &&
+        (resource.data.userUid == request.auth.uid || isAdmin());
     }
   }
 }

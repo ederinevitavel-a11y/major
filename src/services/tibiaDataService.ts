@@ -148,6 +148,21 @@ export interface TibiaCharacterInfo {
   rank?: string;
 }
 
+function parseNumeric(val: unknown): number {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    const cleaned = val.replace(/\D/g, '');
+    const num = Number(cleaned);
+    return isNaN(num) ? 0 : num;
+  }
+  return 0;
+}
+
+function getExpFromLevel(level: number): number {
+  if (level <= 1) return 0;
+  return Math.floor((50 / 3) * (Math.pow(level, 3) - 6 * Math.pow(level, 2) + 17 * level - 12));
+}
+
 export async function fetchCharacter(charName: string): Promise<TibiaCharacterInfo | null> {
   const clean = charName.trim();
   if (!clean) return null;
@@ -158,12 +173,19 @@ export async function fetchCharacter(charName: string): Promise<TibiaCharacterIn
       throw new Error(`HTTP ${res.status}`);
     }
     const json = await res.json();
-    const char = json.characters?.character;
-    if (!char) return null;
+    const char = json.character?.character || json.characters?.character || json.character;
+    if (!char) {
+      console.warn(`Personagem ${clean} não encontrado na resposta da API.`);
+      return null;
+    }
+    const lvl = parseNumeric(char.level);
+    const rawExp = parseNumeric(char.experience ?? char.exp);
+    const experience = rawExp > 0 ? rawExp : getExpFromLevel(lvl);
+
     return {
-      name: char.name,
-      level: char.level || 0,
-      experience: char.experience || 0,
+      name: char.name || clean,
+      level: lvl,
+      experience: experience,
       vocation: char.vocation || '',
       world: char.world || '',
       rank: char.guild?.rank || '',

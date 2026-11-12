@@ -9,7 +9,7 @@ export type PriorityRank =
 
 export type HuntDay = 'friday' | 'saturday' | 'sunday';
 
-export type SlotType = 'normal' | '3h';
+export type SlotType = 'normal' | '3h' | 'planilhados';
 
 export interface UserProfile {
   uid: string;
@@ -20,6 +20,8 @@ export interface UserProfile {
   vocation: string;
   level: number;
   isAdmin: boolean;
+  sharedWith?: string[];
+  trackedXpUids?: string[];
   createdAt: string;
   updatedAt?: string;
   lastSeen?: string;
@@ -44,6 +46,7 @@ export interface ReservationSlot {
   respawnName: string;
   userUid: string;
   isOccupied?: boolean;
+  partyMemberUids?: string[];
   reservedAt: string;
 }
 
@@ -53,6 +56,7 @@ export interface ReservationDetails {
   userUid: string;
   userRank: PriorityRank;
   partyMembers?: string;
+  partyMemberUids?: string[];
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -62,6 +66,7 @@ export interface Reservation extends ReservationSlot {
   charName?: string;
   userRank?: PriorityRank;
   partyMembers?: string;
+  partyMemberUids?: string[];
   notes?: string;
 }
 
@@ -106,7 +111,48 @@ export interface DoubleXpRecord {
   saturdayExp: number;
   sundayExp: number;
   totalExp: number;
+  fridayDate?: string;
+  saturdayDate?: string;
+  sundayDate?: string;
+  targetExp?: number;
   startExp?: number;
   lastCapturedAt?: string;
 }
+
+export interface CustomRespawn {
+  id: string;
+  name: string;
+  type: 'normal' | '3h';
+  addedBy: string;
+  createdAt: string;
+}
+
+export interface ReleasedRespawn {
+  id: string;
+  respawnName: string;
+  timeSlot: string;
+  day: HuntDay;
+  slotType: SlotType;
+  charName: string;
+  userUid: string;
+  releasedAt: string;
+}
+
+export interface LfgPost {
+  id: string; // typically userUid or unique key
+  userUid: string;
+  charName: string;
+  level: number;
+  vocation: string; // Elite Knight, Elder Druid, Master Sorcerer, Royal Paladin, etc.
+  phone: string; // WhatsApp phone number
+  days: HuntDay[]; // e.g. ['friday', 'saturday', 'sunday']
+  timeSlots: string; // e.g. "Manhã e Tarde (08:00h – 16:00h)"
+  notes?: string; // Goal, desired respawn or party role
+  rank?: PriorityRank;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type MainTab = 'schedule' | 'lfg' | 'released' | 'my-schedule' | 'members' | 'settings';
+
 

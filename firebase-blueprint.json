@@ -180,6 +180,112 @@
         }
       },
       "required": ["activeGuilds"]
+    },
+    "releasedRespawn": {
+      "title": "ReleasedRespawn",
+      "description": "Log of respawns voluntarily freed up by players so others can claim them early.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique released respawn identifier."
+        },
+        "respawnName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Name of the freed hunt respawn."
+        },
+        "timeSlot": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Time window of the respawn."
+        },
+        "day": {
+          "type": "string",
+          "enum": ["friday", "saturday", "sunday"],
+          "description": "Weekend day."
+        },
+        "slotType": {
+          "type": "string",
+          "enum": ["normal", "3h"],
+          "description": "Normal or 3h slot."
+        },
+        "charName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Character name of the member who released the respawn."
+        },
+        "userUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the player who released the respawn."
+        },
+        "releasedAt": {
+          "type": "string",
+          "description": "ISO timestamp when the respawn was freed."
+        }
+      },
+      "required": ["id", "respawnName", "timeSlot", "day", "slotType", "charName", "userUid", "releasedAt"]
+    },
+    "lfgPost": {
+      "title": "LfgPost",
+      "description": "Quero Hunt card posted by players looking for a party for double exp weekend.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier (usually player userUid)."
+        },
+        "userUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the player."
+        },
+        "charName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Character name."
+        },
+        "level": {
+          "type": "number",
+          "description": "Character level."
+        },
+        "vocation": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Character vocation (EK, ED, MS, RP)."
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "WhatsApp contact number."
+        },
+        "days": {
+          "type": "array",
+          "description": "Weekend days available."
+        },
+        "timeSlots": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Description of available hours."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Short note or goal."
+        },
+        "rank": {
+          "type": "string",
+          "description": "Guild rank."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when updated."
+        }
+      },
+      "required": ["id", "userUid", "charName", "level", "vocation", "phone", "days", "createdAt"]
     }
   },
   "firestore": {
@@ -202,6 +308,14 @@
     "/guild_settings/{settingId}": {
       "schema": { "$ref": "#/entities/guildSetting" },
       "description": "Guild app configuration parameters."
+    },
+    "/released_respawns/{releasedId}": {
+      "schema": { "$ref": "#/entities/releasedRespawn" },
+      "description": "Log of voluntarily freed respawns during double exp weekend."
+    },
+    "/lfg_posts/{postId}": {
+      "schema": { "$ref": "#/entities/lfgPost" },
+      "description": "Quero Hunt party search cards."
     }
   }
 }

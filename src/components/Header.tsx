@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { RANK_METADATA } from '../constants/guildData';
+import { MainTab } from '../types';
 import {
   CalendarDays,
   Users,
@@ -8,18 +9,25 @@ import {
   Sun,
   LogOut,
   Share2,
+  SlidersHorizontal,
+  Zap,
+  Swords,
 } from 'lucide-react';
 
 interface HeaderProps {
-  currentTab: 'schedule' | 'my-schedule' | 'members' | 'settings';
-  setCurrentTab: (tab: 'schedule' | 'my-schedule' | 'members' | 'settings') => void;
+  currentTab: MainTab;
+  setCurrentTab: (tab: MainTab) => void;
   onOpenExport: () => void;
+  releasedCount?: number;
+  lfgCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentTab,
   setCurrentTab,
   onOpenExport,
+  releasedCount = 0,
+  lfgCount = 0,
 }) => {
   const { userProfile, signOut, darkMode, toggleDarkMode, isAdmin } = useAuth();
 
@@ -54,42 +62,85 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Navigation Links */}
-          <nav className="hidden md:flex items-center gap-1.5 bg-slate-100/80 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60">
+          <nav className="hidden md:flex items-center gap-1.5 bg-slate-100/80 dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/60">
+            {/* 1. Agenda — Azul Royal / Indigo */}
             <button
               onClick={() => setCurrentTab('schedule')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer relative ${
                 currentTab === 'schedule'
-                  ? 'bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400'
-                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25'
+                  : 'text-blue-700 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/60 dark:border-blue-900/40'
               }`}
             >
-              <CalendarDays className="h-4 w-4" />
-              Grade de Respawns
+              <CalendarDays className={`h-4 w-4 ${currentTab === 'schedule' ? 'text-white' : 'text-blue-500 dark:text-blue-400'}`} />
+              <span>Agenda</span>
             </button>
 
+            {/* 2. Quero Hunt! — Âmbar / Rose */}
+            <button
+              onClick={() => setCurrentTab('lfg')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer relative ${
+                currentTab === 'lfg'
+                  ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-md shadow-amber-500/25'
+                  : 'text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200/60 dark:border-amber-900/40'
+              }`}
+            >
+              <Swords className={`h-4 w-4 ${currentTab === 'lfg' ? 'text-white' : 'text-amber-500 dark:text-amber-400'}`} />
+              <span>Quero Hunt!</span>
+              {lfgCount > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  currentTab === 'lfg' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'
+                } animate-pulse`}>
+                  {lfgCount}
+                </span>
+              )}
+            </button>
+
+            {/* 3. Respaws Liberados — Esmeralda / Teal */}
+            <button
+              onClick={() => setCurrentTab('released')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer relative ${
+                currentTab === 'released'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/25'
+                  : 'text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200/60 dark:border-emerald-900/40'
+              }`}
+            >
+              <Zap className={`h-4 w-4 ${currentTab === 'released' ? 'text-white' : 'text-emerald-500 dark:text-emerald-400'}`} />
+              <span>Respaws Liberados</span>
+              {releasedCount > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  currentTab === 'released' ? 'bg-white text-emerald-600' : 'bg-emerald-500 text-white'
+                } animate-pulse`}>
+                  {releasedCount}
+                </span>
+              )}
+            </button>
+
+            {/* 4. Meus Controles — Violeta / Fúcsia */}
             <button
               onClick={() => setCurrentTab('my-schedule')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer relative ${
                 currentTab === 'my-schedule'
-                  ? 'bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400'
-                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+                  ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-md shadow-violet-500/25'
+                  : 'text-violet-700 dark:text-violet-400 hover:text-violet-800 dark:hover:text-violet-300 bg-violet-50/70 dark:bg-violet-950/25 border border-violet-200/60 dark:border-violet-900/40'
               }`}
             >
-              <Users className="h-4 w-4" />
-              Meus Agendamentos
+              <SlidersHorizontal className={`h-4 w-4 ${currentTab === 'my-schedule' ? 'text-white' : 'text-violet-500 dark:text-violet-400'}`} />
+              <span>Meus Controles</span>
             </button>
 
+            {/* 5. Admin — Rose / Vermelho Carmesim */}
             {isAdmin && (
               <button
                 onClick={() => setCurrentTab('members')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer relative ${
                   currentTab === 'members'
-                    ? 'bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+                    ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md shadow-rose-500/25'
+                    : 'text-rose-700 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 bg-rose-50/70 dark:bg-rose-950/25 border border-rose-200/60 dark:border-rose-900/40'
                 }`}
               >
-                <Users className="h-4 w-4" />
-                Painel Admin & Ranks
+                <Users className={`h-4 w-4 ${currentTab === 'members' ? 'text-white' : 'text-rose-500 dark:text-rose-400'}`} />
+                <span>Admin</span>
               </button>
             )}
           </nav>
@@ -151,40 +202,85 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Mobile Navigation bar */}
-        <div className="flex md:hidden items-center justify-around py-2 border-t border-slate-100 dark:border-slate-800">
+        <div className="flex md:hidden items-center justify-around py-2 border-t border-slate-100 dark:border-slate-800 overflow-x-auto gap-1">
+          {/* Mobile Agenda */}
           <button
             onClick={() => setCurrentTab('schedule')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg ${
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg shrink-0 transition-all ${
               currentTab === 'schedule'
-                ? 'text-blue-600 bg-blue-50 dark:bg-blue-950/60 dark:text-blue-400'
-                : 'text-slate-600 dark:text-slate-400'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs'
+                : 'text-blue-700 dark:text-blue-400 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40'
             }`}
           >
             <CalendarDays className="h-3.5 w-3.5" />
-            Grade
+            Agenda
           </button>
+
+          {/* Mobile Quero Hunt! */}
           <button
-            onClick={() => setCurrentTab('my-schedule')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg ${
-              currentTab === 'my-schedule'
-                ? 'text-blue-600 bg-blue-50 dark:bg-blue-950/60 dark:text-blue-400'
-                : 'text-slate-600 dark:text-slate-400'
+            onClick={() => setCurrentTab('lfg')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg shrink-0 relative transition-all ${
+              currentTab === 'lfg'
+                ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-xs'
+                : 'text-amber-700 dark:text-amber-400 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40'
             }`}
           >
-            <Users className="h-3.5 w-3.5" />
-            Meus Horários
+            <Swords className="h-3.5 w-3.5" />
+            <span>Quero Hunt!</span>
+            {lfgCount > 0 && (
+              <span className={`px-1 py-0.2 rounded-full text-[9px] font-black ${
+                currentTab === 'lfg' ? 'bg-white text-rose-600' : 'bg-rose-500 text-white'
+              }`}>
+                {lfgCount}
+              </span>
+            )}
           </button>
+
+          {/* Mobile Respaws Liberados */}
+          <button
+            onClick={() => setCurrentTab('released')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg shrink-0 relative transition-all ${
+              currentTab === 'released'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-xs'
+                : 'text-emerald-700 dark:text-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-900/40'
+            }`}
+          >
+            <Zap className="h-3.5 w-3.5" />
+            <span>Liberados</span>
+            {releasedCount > 0 && (
+              <span className={`px-1 py-0.2 rounded-full text-[9px] font-black ${
+                currentTab === 'released' ? 'bg-white text-emerald-600' : 'bg-emerald-500 text-white'
+              }`}>
+                {releasedCount}
+              </span>
+            )}
+          </button>
+
+          {/* Mobile Meus Controles */}
+          <button
+            onClick={() => setCurrentTab('my-schedule')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg shrink-0 transition-all ${
+              currentTab === 'my-schedule'
+                ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-xs'
+                : 'text-violet-700 dark:text-violet-400 bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/60 dark:border-violet-900/40'
+            }`}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Controles
+          </button>
+
+          {/* Mobile Admin */}
           {isAdmin && (
             <button
               onClick={() => setCurrentTab('members')}
-              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg ${
+              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg shrink-0 transition-all ${
                 currentTab === 'members'
-                  ? 'text-blue-600 bg-blue-50 dark:bg-blue-950/60 dark:text-blue-400'
-                : 'text-slate-600 dark:text-slate-400'
+                  ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-xs'
+                  : 'text-rose-700 dark:text-rose-400 bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200/60 dark:border-rose-900/40'
               }`}
             >
               <Users className="h-3.5 w-3.5" />
-              Membros & Acesso
+              Admin
             </button>
           )}
         </div>

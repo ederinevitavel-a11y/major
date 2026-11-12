@@ -7,31 +7,33 @@ export const DAYS_CONFIG: Array<{ key: HuntDay; label: string; shortLabel: strin
 ];
 
 export const NORMAL_TIME_SLOTS: string[] = [
-  '05:00h – 08:00h',
-  '08:00h – 10:20h',
-  '10:20h – 12:40h',
-  '12:40h – 15:00h',
-  '15:00h – 17:20h',
-  '17:20h – 19:40h',
-  '19:40h – 22:00h',
-  '22:00h – 00:20h',
-  '00:20h – 02:40h',
-  '02:40h – 05:00h',
+  '06:00h – 09:00h',
+  '09:00h – 11:20h',
+  '11:20h – 13:40h',
+  '13:40h – 16:00h',
+  '16:00h – 18:20h',
+  '18:20h – 20:40h',
+  '20:40h – 23:00h',
+  '23:00h – 01:20h',
+  '01:20h – 03:40h',
+  '03:40h – 06:00h',
 ];
 
 export const THREE_HOUR_TIME_SLOTS: string[] = [
-  '05:00h – 08:00h',
-  '08:00h – 12:20h',
-  '12:20h – 15:40h',
-  '15:40h – 19:00h',
-  '19:00h – 22:20h',
-  '22:20h – 01:40h',
-  '01:40h – 05:00h',
+  '06:00h – 09:00h',
+  '09:00h – 13:20h',
+  '13:20h – 16:40h',
+  '16:40h – 20:00h',
+  '20:00h – 23:20h',
+  '23:20h – 02:40h',
+  '02:40h – 06:00h',
 ];
 
 export const NORMAL_RESPAWNS: string[] = [
   'Asura Espelho',
   'Azzilon Castle',
+  'Bloodfire Gorge',
+  'Bulltair -1',
   'Bulltair -2',
   'Caminho Ferumbras',
   'Cobra Castelo',
@@ -47,36 +49,157 @@ export const NORMAL_RESPAWNS: string[] = [
   'Ingol (-2)',
   'Ingol (-3)',
   'Ingol (Surface)',
+  'Inner Crypt',
   'Livro Energy',
   'Livro Fire',
   'Livro Ice',
-  'Monster Graveyard (Direita)',
-  'Monster Graveyard (Esquerda)',
   'Nimmersatt Dragon (+1)',
   'Nimmersatt Dragon (Normal)',
   'Norcferatu Castle',
   'Norcferatu Catacombs (Direita)',
   'Norcferatu Catacombs (Esquerda)',
+  'Plague Seal',
   'Podzilla Roothing -2',
   'Pumin -1 / -2',
-  'Rotten Wasteland',
-  'Souls Venore',
-  'Sparkling Polls (Alt)',
-  'Sparkling Polls (Normal)',
+  'Quaras Podzilla',
+  'Soul Fear',
+  'Souls Earth',
+  'Souls Energy',
+  'True Asura',
+  'Undead Seal',
   'Unhallowed Crypt',
   'Upper Roshamuul',
   'Warzone 3',
   'West',
 ];
 
-export const THREE_HOUR_RESPAWNS: string[] = [
-  'Darklight',
+export const THREE_HOUR_RESPAWNS: string[] = [];
+
+export const PLANILHADOS_RESPAWNS: string[] = [
+  'Darklight Core',
   'Gloom Pillars',
   'Jaded Roots',
+  'Monster Graveyard Direita',
+  'Monster Graveyard Esquerda',
   'Putrefactory',
   'Radiant Ascendancy',
   'Radiant Skyhold',
+  'Souls Fire Raid',
+  'Souls Thais',
+  'Sparkling Pools',
 ];
+
+export const PLANILHADOS_SLOTS_MAP: Record<string, string[]> = {
+  'Darklight Core': ['18:00h – 20:00h', '20:00h – 22:30h'],
+  'Gloom Pillars': ['06:15h – 08:30h', '08:30h – 12:00h', '19:15h – 22:30h', '21:00h – 23:00h', '22:30h – 01:00h'],
+  'Jaded Roots': ['06:10h – 09:20h', '09:20h – 13:00h', '14:30h – 18:10h', '19:30h – 22:15h', '22:15h – 00:30h'],
+  'Monster Graveyard Direita': ['06:30h – 08:00h'],
+  'Monster Graveyard Esquerda': ['06:20h – 09:00h', '08:00h – 09:00h', '09:00h – 12:00h', '16:00h – 18:00h', '19:00h – 21:30h'],
+  'Putrefactory': ['06:00h – 09:00h', '09:00h – 12:15h', '17:50h – 21:00h', '21:30h – 01:00h'],
+  'Souls Fire Raid': ['13:00h – 14:00h', '23:00h – 01:30h'],
+  'Souls Thais': ['14:00h – 17:35h', '19:30h – 22:00h', '20:00h – 22:30h'],
+  'Sparkling Pools': ['06:20h – 09:00h'],
+};
+
+export const PLANILHADOS_COLOR_MAP: Record<string, { label: string; dotEmoji: string; badgeClass: string; borderClass: string; bgClass: string }> = {
+  'Darklight Core': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Gloom Pillars': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Jaded Roots': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Monster Graveyard Direita': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Monster Graveyard Esquerda': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Putrefactory': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Radiant Ascendancy': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Radiant Skyhold': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Souls Fire Raid': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Souls Thais': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+  'Sparkling Pools': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
+};
+
+export const parseStartTime = (slot: string): number => {
+  const match = slot.match(/^(\d{2}):(\d{2})/);
+  if (!match) return 0;
+  return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+};
+
+export const parseDayStartTime = (slot: string): number => {
+  let min = parseStartTime(slot);
+  if (min < 360) min += 1440; // 06:00h is 360 min. Slots from 00:00 to 05:59 belong to the end of the 24h cycle
+  return min;
+};
+
+export const parseSlotRange = (slot: string): { start: number; end: number } => {
+  const match = slot.match(/^(\d{2}):(\d{2})\s*–\s*(\d{2}):(\d{2})/);
+  if (!match) return { start: 0, end: 0 };
+  let start = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+  let end = parseInt(match[3], 10) * 60 + parseInt(match[4], 10);
+  if (end <= start) end += 1440;
+  return { start, end };
+};
+
+export const formatMinutesToSlot = (startMin: number, endMin: number): string => {
+  const formatHourMin = (totalMin: number) => {
+    const modMin = (totalMin % 1440 + 1440) % 1440;
+    const h = Math.floor(modMin / 60).toString().padStart(2, '0');
+    const m = (modMin % 60).toString().padStart(2, '0');
+    return `${h}:${m}h`;
+  };
+  return `${formatHourMin(startMin)} – ${formatHourMin(endMin)}`;
+};
+
+export const getPlanilhadoAllTimeSlots = (respawnName: string): string[] => {
+  const customSlots = PLANILHADOS_SLOTS_MAP[respawnName] || [];
+  if (customSlots.length === 0) return NORMAL_TIME_SLOTS;
+
+  const customRanges = customSlots.map(s => parseSlotRange(s)).sort((a, b) => a.start - b.start);
+
+  const dayStart = 360; // 06:00h
+  const dayEnd = 1800; // 06:00h next day
+
+  const resultSlots: string[] = [...customSlots];
+
+  const splitGapInto2h20m = (gStart: number, gEnd: number) => {
+    let current = gStart;
+    const maxDuration = 140; // 2 hours and 20 minutes
+
+    while (current < gEnd) {
+      const remaining = gEnd - current;
+      if (remaining <= 20) {
+        break;
+      }
+      if (remaining <= maxDuration) {
+        resultSlots.push(formatMinutesToSlot(current, gEnd));
+        break;
+      } else {
+        const next = current + maxDuration;
+        resultSlots.push(formatMinutesToSlot(current, next));
+        current = next;
+      }
+    }
+  };
+
+  let lastEnd = dayStart;
+
+  for (const range of customRanges) {
+    let rangeStart = range.start;
+    if (rangeStart < dayStart) rangeStart += 1440;
+    let rangeEnd = range.end;
+    if (rangeEnd < rangeStart) rangeEnd += 1440;
+
+    if (rangeStart > lastEnd) {
+      splitGapInto2h20m(lastEnd, rangeStart);
+    }
+    if (rangeEnd > lastEnd) {
+      lastEnd = rangeEnd;
+    }
+  }
+
+  if (lastEnd < dayEnd) {
+    splitGapInto2h20m(lastEnd, dayEnd);
+  }
+
+  const uniqueSlots = Array.from(new Set(resultSlots));
+  return uniqueSlots.sort((a, b) => parseDayStartTime(a) - parseDayStartTime(b));
+};
 
 export const PRIORITY_RANKS: PriorityRank[] = [
   'Leader',
