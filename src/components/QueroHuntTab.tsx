@@ -211,7 +211,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
               <span>Ultima Chance!</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
-              Jogadores Procurando Party
+              Procurando PT!
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
               Encontre jogadores sem PT para a Double XP!

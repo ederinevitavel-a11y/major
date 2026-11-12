@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Reservation, HuntDay, SlotType, UserProfile } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { setReservation, deleteReservation, updateUserProfile } from '../services/firestoreService';
-import { RANK_METADATA } from '../constants/guildData';
+import { RANK_METADATA, getCanonicalPlayerName } from '../constants/guildData';
 import {
   X,
   Clock,
@@ -51,10 +51,34 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isOwner = Boolean(existingReservation && currentUser && existingReservation.userUid === currentUser.uid);
+  const isOwner = Boolean(
+    existingReservation && currentUser && (
+      existingReservation.userUid === currentUser.uid ||
+      (userProfile?.charName && existingReservation.charName && (
+        existingReservation.charName.trim().toLowerCase() === userProfile.charName.trim().toLowerCase() ||
+        getCanonicalPlayerName(existingReservation.charName).toLowerCase() === userProfile.charName.trim().toLowerCase()
+      ))
+    )
+  );
   const isLeader = userProfile?.rank === 'Leader';
   const canBookRespawn = isAdmin || isLeader;
   const canModify = isAdmin || isOwner;
+
+  const canSeeDetails = Boolean(
+    isAdmin ||
+    isOwner ||
+    existingReservation?.isPublicVisibility === true ||
+    (currentUser && existingReservation?.partyMemberUids?.includes(currentUser.uid)) ||
+    (currentUser && usersList.some(u => 
+      (u.uid === existingReservation?.userUid ||
+        (existingReservation?.charName && u.charName && (
+          u.charName.trim().toLowerCase() === existingReservation.charName.trim().toLowerCase() ||
+          u.charName.trim().toLowerCase() === getCanonicalPlayerName(existingReservation.charName).toLowerCase()
+        ))) &&
+      u.sharedWith &&
+      (u.sharedWith.includes('all') || u.sharedWith.includes(currentUser.uid))
+    ))
+  );
 
   const handleDelete = async () => {
     if (!existingReservation) return;
@@ -443,13 +467,54 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         )}
 
         {existingReservation && !canModify && (
-          <div className="pt-2 flex justify-end">
-            <button
-              onClick={onClose}
-              className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
-            >
-              Fechar
-            </button>
+          <div className="py-6 text-center space-y-4">
+            <div className="h-12 w-12 rounded-2xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 flex items-center justify-center mx-auto">
+              <Lock className="h-6 w-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-black text-slate-900 dark:text-white">
+                Horário Ocupado
+              </h4>
+              {canSeeDetails && existingReservation.charName ? (
+                <div className="mt-3 p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-xs text-blue-950 dark:text-blue-200 text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-500 dark:text-slate-400">Jogador no Respawn:</span>
+                    <span className="font-black text-blue-700 dark:text-blue-300 text-sm">{existingReservation.charName}</span>
+                  </div>
+                  {existingReservation.userRank && (
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-slate-500 dark:text-slate-400">Patente:</span>
+                      <span className="font-bold text-slate-700 dark:text-slate-300">{existingReservation.userRank}</span>
+                    </div>
+                  )}
+                  {existingReservation.partyMembers && (
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-slate-500 dark:text-slate-400">Party:</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">{existingReservation.partyMembers}</span>
+                    </div>
+                  )}
+                  {existingReservation.notes && (
+                    <div className="mt-2 pt-2 border-t border-blue-200/60 dark:border-blue-800/60 text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                      📌 {existingReservation.notes}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 max-w-sm mx-auto leading-relaxed">
+                  Este respawn já está reservado para este horário. Os nomes dos jogadores são privados para membros comuns e apenas ficam visíveis caso o jogador faça a liberação através do <strong>botão de visibilidade</strong>.
+                </p>
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-center">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold transition-all cursor-pointer shadow-md"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         )}
       </div>

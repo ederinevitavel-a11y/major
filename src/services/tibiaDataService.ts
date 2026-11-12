@@ -146,6 +146,8 @@ export interface TibiaCharacterInfo {
   vocation: string;
   world: string;
   rank?: string;
+  yesterdayExp?: number;
+  xpDate?: string;
 }
 
 function parseNumeric(val: unknown): number {

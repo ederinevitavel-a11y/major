@@ -14,7 +14,7 @@ import {
 } from '../services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from '../services/tibiaDataService';
 import { fetchGuildHighscores, fetchCharacterHighscores, fetchMissclickMembers } from '../services/missclickApi';
-import { PRIORITY_RANKS, RANK_METADATA, DEFAULT_GUILDS, SUPER_ADMIN_EMAIL, DAYS_CONFIG } from '../constants/guildData';
+import { PRIORITY_RANKS, RANK_METADATA, DEFAULT_GUILDS, SUPER_ADMIN_EMAIL, DAYS_CONFIG, SPECIAL_SCHEDULE_PLAYERS } from '../constants/guildData';
 import { ResetScheduleModal } from './ResetScheduleModal';
 import { AdminAssignModal } from './AdminAssignModal';
 import {
@@ -42,6 +42,10 @@ import {
   Zap,
   EyeOff,
   FileSpreadsheet,
+  UserCheck,
+  UserX,
+  Clock,
+  Copy,
 } from 'lucide-react';
 import { ExportModal } from './ExportModal';
 
@@ -72,14 +76,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const [guildHighscoresData, setGuildHighscoresData] = useState<any>(null);
   const [loadingGuildHs, setLoadingGuildHs] = useState(false);
+  const [guildHsError, setGuildHsError] = useState<string | null>(null);
 
-  const loadGuildHighscores = async () => {
+  const loadGuildHighscores = async (forceRefresh = false) => {
     setLoadingGuildHs(true);
+    setGuildHsError(null);
     try {
-      const data = await fetchGuildHighscores();
-      setGuildHighscoresData(data);
+      const hintMap = new Map<string, { name: string; level?: number; vocation?: string }>();
+      usersList.forEach(u => {
+        if (u.charName) {
+          hintMap.set(u.charName.trim().toLowerCase(), {
+            name: u.charName.trim(),
+            level: u.level,
+            vocation: u.vocation,
+          });
+        }
+      });
+      SPECIAL_SCHEDULE_PLAYERS.forEach(sp => {
+        const key = sp.charName.trim().toLowerCase();
+        if (!hintMap.has(key)) {
+          hintMap.set(key, { name: sp.charName });
+        }
+      });
+
+      const data = await fetchGuildHighscores(Array.from(hintMap.values()), forceRefresh);
+      if (!data || data.error) {
+        setGuildHsError('Não foi possível obter os dados de experiência da API no momento. Tente novamente em instantes.');
+      } else {
+        setGuildHighscoresData(data);
+      }
     } catch (err) {
       console.error(err);
+      setGuildHsError('Erro ao carregar experiência dos jogadores. Tente novamente.');
     } finally {
       setLoadingGuildHs(false);
     }
@@ -97,6 +125,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Assign Respawn Modal State
   const [assignUser, setAssignUser] = useState<UserProfile | null>(null);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+
+  // Special Schedule Players State
+  const [specialSearch, setSpecialSearch] = useState('');
+  const [quickAuthorizeEmail, setQuickAuthorizeEmail] = useState<Record<string, string>>({});
+  const [savingQuickEmail, setSavingQuickEmail] = useState<string | null>(null);
 
   // Allowed Emails State
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
@@ -128,7 +162,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleDeleteHunt = async (id: string, name: string) => {
-    if (!window.confirm(`Remover a hunt "${name}" da lista?`)) return;
     try {
       await removeCustomRespawn(id);
       setToastMessage(`Hunt "${name}" removida com sucesso.`);
@@ -323,6 +356,78 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       });
   }, [usersList, selectedRank, filterOnlineOnly, hiddenPlayerUids, searchQuery, currentUser]);
 
+  // Special Schedule Players Tracking & Dynamic Linking
+  const specialPlayersWithStatus = useMemo(() => {
+    const userMap = new Map<string, UserProfile>();
+    usersList.forEach(u => {
+      if (u.charName) {
+        userMap.set(u.charName.trim().toLowerCase(), u);
+      }
+    });
+
+    return SPECIAL_SCHEDULE_PLAYERS.map(p => {
+      const matched =
+        userMap.get(p.charName.trim().toLowerCase()) ||
+        (p.playerOwner ? userMap.get(p.playerOwner.trim().toLowerCase()) : undefined);
+      const isOnline = matched ? isOnlineHelper(matched) : false;
+      return {
+        ...p,
+        isRegistered: Boolean(matched),
+        userProfile: matched || null,
+        isOnline,
+      };
+    });
+  }, [usersList, currentUser]);
+
+  const specialSummaryStats = useMemo(() => {
+    const total = SPECIAL_SCHEDULE_PLAYERS.length;
+    const linked = specialPlayersWithStatus.filter(p => p.isRegistered).length;
+    const pending = total - linked;
+    return { total, linked, pending };
+  }, [specialPlayersWithStatus]);
+
+  // Pending Special Schedule Players (Strictly filtered to un-registered players)
+  const pendingSpecialPlayers = useMemo(() => {
+    return specialPlayersWithStatus.filter(p => !p.isRegistered);
+  }, [specialPlayersWithStatus]);
+
+  const filteredSpecialPlayers = useMemo(() => {
+    return pendingSpecialPlayers.filter(p => {
+      if (specialSearch.trim()) {
+        const q = specialSearch.toLowerCase();
+        const matchName = p.charName.toLowerCase().includes(q);
+        const matchRespawns = p.respawnsSummary.toLowerCase().includes(q);
+        const matchRank = p.suggestedRank.toLowerCase().includes(q);
+        if (!matchName && !matchRespawns && !matchRank) return false;
+      }
+      return true;
+    });
+  }, [pendingSpecialPlayers, specialSearch]);
+
+  const handleQuickAddSpecialEmail = async (charName: string) => {
+    const emailToAdd = quickAuthorizeEmail[charName]?.trim();
+    if (!emailToAdd) return;
+    setSavingQuickEmail(charName);
+    try {
+      await addAllowedEmail(
+        emailToAdd,
+        'member',
+        currentUser?.email || 'admin',
+        `Horário Especial: ${charName}`
+      );
+      await loadEmails();
+      setToastMessage(`E-mail ${emailToAdd} autorizado para ${charName}!`);
+      setQuickAuthorizeEmail(prev => ({ ...prev, [charName]: '' }));
+      setTimeout(() => setToastMessage(null), 4000);
+    } catch (err) {
+      console.error(err);
+      setToastMessage('Falha ao autorizar e-mail.');
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setSavingQuickEmail(null);
+    }
+  };
+
   const handleAddEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEmail.trim()) return;
@@ -346,12 +451,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleRemoveEmail = async (email: string) => {
-    if (!window.confirm(`Remover autorização para ${email}?`)) return;
     try {
       await removeAllowedEmail(email);
       await loadEmails();
+      setToastMessage(`Autorização para ${email} removida.`);
+      setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
       console.error(err);
+      setToastMessage('Erro ao remover e-mail.');
+      setTimeout(() => setToastMessage(null), 4000);
     }
   };
 
@@ -380,7 +488,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
       console.error(err);
-      alert('Erro ao salvar edição do membro.');
+      setToastMessage('Erro ao salvar edição do membro.');
+      setTimeout(() => setToastMessage(null), 4000);
     } finally {
       setSavingUser(false);
     }
@@ -428,23 +537,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
 
           {/* Sub-tabs navigation */}
-          <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl overflow-x-auto">
-            <button
-              onClick={() => setActiveSubTab('assign')}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeSubTab === 'assign'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Target className="h-3.5 w-3.5" />
-              <span>Cadastrar Respawns</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
-                activeSubTab === 'assign' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-              }`}>
-                {rankStats.all.online} online
-              </span>
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl overflow-x-auto">
+              <button
+                onClick={() => setActiveSubTab('assign')}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  activeSubTab === 'assign'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Lista e presença de membros da guilda"
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span>Membros & Fila</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  activeSubTab === 'assign' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                }`}>
+                  {rankStats.all.online} online
+                </span>
+              </button>
 
             <button
               onClick={() => setActiveSubTab('emails')}
@@ -484,14 +595,168 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <span>Respaws Liberados ({releasedRespawnsList.length})</span>
             </button>
           </div>
+
+          {/* Action Button: + Cadastrar Respawn */}
+          <button
+            type="button"
+            onClick={() => {
+              setAssignUser(null);
+              setIsAssignModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white shadow-md shadow-blue-500/25 transition-all cursor-pointer whitespace-nowrap active:scale-95"
+            title="Abrir modal para cadastrar respawns"
+          >
+            <Target className="h-4 w-4" />
+            <span>+ Cadastrar Respawn</span>
+          </button>
         </div>
       </div>
+    </div>
 
       {/* ======================================================== */}
       {/* SUB-TAB 1: DEDICATED RANK FILTER & RESPAWN ALLOCATION     */}
       {/* ======================================================== */}
       {activeSubTab === 'assign' && (
         <div className="space-y-5">
+          {/* ======================================================== */}
+          {/* VÍNCULO DOS HORÁRIOS ESPECIAIS (APENAS PENDENTES)        */}
+          {/* ======================================================== */}
+          <div className="rounded-2xl border border-amber-200/80 dark:border-amber-900/60 bg-gradient-to-br from-amber-50/30 via-white to-slate-50/50 dark:from-slate-900 dark:via-slate-900 dark:to-amber-950/20 p-5 shadow-sm space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-amber-100 dark:border-amber-900/40">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-amber-500 text-white shadow-sm shadow-amber-500/25">
+                    <AlertCircle className="h-4 w-4" />
+                  </span>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Vínculo de Horários Especiais — Pendentes de Cadastro
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    {filteredSpecialPlayers.length} {filteredSpecialPlayers.length === 1 ? 'Pendente' : 'Pendentes'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Mostrando apenas os jogadores que possuem horários especiais na planilha e ainda não efetuaram o primeiro login no app. Os jogadores já cadastrados já estão vinculados e gerenciando seus horários em "Meus Controles".
+                </p>
+              </div>
+
+              {/* Status Counters */}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-xs font-bold text-amber-800 dark:text-amber-300">
+                  <UserX className="h-4 w-4 text-amber-600" />
+                  <span>{specialSummaryStats.pending} Pendentes</span>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-800 dark:text-emerald-300" title="Jogadores já cadastrados com vínculo ativo">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  <span>{specialSummaryStats.linked} Já Vinculados</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Search Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                {filteredSpecialPlayers.length > 0 ? (
+                  <span>Jogadores que precisam efetuar login ou ter o e-mail pré-autorizado:</span>
+                ) : null}
+              </div>
+
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={specialSearch}
+                  onChange={e => setSpecialSearch(e.target.value)}
+                  placeholder="Buscar jogador pendente ou respawn..."
+                  className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+
+            {/* List / Cards of Pending Players */}
+            {filteredSpecialPlayers.length === 0 ? (
+              <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 p-6 text-center space-y-2">
+                <CheckCircle2 className="h-8 w-8 text-emerald-600 dark:text-emerald-400 mx-auto" />
+                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-200">
+                  {specialSearch.trim() ? 'Nenhum jogador pendente encontrado para a busca.' : 'Nenhum jogador pendente!'}
+                </p>
+                <p className="text-xs text-emerald-700 dark:text-emerald-400 max-w-md mx-auto">
+                  {specialSearch.trim()
+                    ? 'Tente pesquisar por outro nome ou respawn.'
+                    : `Todos os ${specialSummaryStats.total} jogadores com horários especiais já efetuaram login e estão com seus vínculos ativos no sistema.`}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filteredSpecialPlayers.map(p => {
+                  const rankMeta = RANK_METADATA[p.suggestedRank];
+                  return (
+                    <div
+                      key={p.charName}
+                      className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-slate-900 p-3.5 flex flex-col justify-between gap-3 transition-all hover:border-amber-300 dark:hover:border-amber-800 shadow-xs"
+                    >
+                      <div className="space-y-2">
+                        {/* Top Header: Character Name + Rank & Status Badge */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-sm text-slate-900 dark:text-white">
+                                {p.charName}
+                              </span>
+                            </div>
+                            <span
+                              className={`inline-block mt-0.5 px-1.5 py-0.2 rounded text-[10px] font-extrabold border ${rankMeta.badgeClass}`}
+                            >
+                              {p.suggestedRank}
+                            </span>
+                          </div>
+
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            <AlertCircle className="h-3 w-3 text-amber-600" />
+                            <span>Pendente</span>
+                          </span>
+                        </div>
+
+                        {/* Respawns Info */}
+                        <div className="flex items-start gap-1.5 text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-100 dark:border-slate-800">
+                          <Clock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
+                          <span className="text-[11px] leading-tight font-medium">
+                            {p.respawnsSummary}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Quick Authorization Action */}
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] space-y-1.5">
+                        <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                          Ainda não fez login com Google no app:
+                        </p>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="email"
+                            placeholder="E-mail Gmail do jogador..."
+                            value={quickAuthorizeEmail[p.charName] || ''}
+                            onChange={e => setQuickAuthorizeEmail(prev => ({ ...prev, [p.charName]: e.target.value }))}
+                            className="w-full px-2 py-1 rounded text-[11px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleQuickAddSpecialEmail(p.charName)}
+                            disabled={savingQuickEmail === p.charName || !quickAuthorizeEmail[p.charName]?.trim()}
+                            className="px-2 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                            title="Autorizar e-mail deste jogador na lista de permissões"
+                          >
+                            {savingQuickEmail === p.charName ? '...' : '+ Autorizar'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Rank Filter Control Card */}
           <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -806,7 +1071,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => setAssignUser(user)}
+                          onClick={() => {
+                            setAssignUser(user);
+                            setIsAssignModalOpen(true);
+                          }}
                           className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all cursor-pointer"
                         >
                           <Target className="h-4 w-4" />
@@ -1002,10 +1270,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Incluir / Gerenciar Hunts Manualmente
+                  Cadastrar Novos Locais de Respawn
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Adicione novas hunts ou respawns personalizados que aparecerão imediatamente na grade da guilda.
+                  Adicione novos locais de hunts ou respawns que aparecerão imediatamente na grade de horários da guilda.
                 </p>
               </div>
             </div>
@@ -1015,7 +1283,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 type="text"
                 value={newHuntName}
                 onChange={e => setNewHuntName(e.target.value)}
-                placeholder="Nome da Hunt (Ex: Deeper Banuta)"
+                placeholder="Nome do Respawn (Ex: Deeper Banuta, Nagas, etc.)"
                 required
                 className="flex-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-white"
               />
@@ -1032,10 +1300,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <button
                 type="submit"
                 disabled={addingHunt}
-                className="inline-flex items-center justify-center gap-1.5 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
               >
                 {addingHunt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                <span>Adicionar Hunt</span>
+                <span>Adicionar Nova Hunt</span>
               </button>
             </form>
 
@@ -1224,7 +1492,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               <button
                 type="button"
-                onClick={loadGuildHighscores}
+                onClick={() => loadGuildHighscores(true)}
                 disabled={loadingGuildHs}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer disabled:opacity-50"
               >
@@ -1233,6 +1501,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </button>
             </div>
 
+            {guildHsError && (
+              <div className="rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/30 p-3 text-xs font-semibold text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{guildHsError}</span>
+              </div>
+            )}
+
             {loadingGuildHs ? (
               <div className="py-12 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
@@ -1240,6 +1515,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             ) : guildHighscoresData ? (
               <div className="space-y-3">
+                {guildHighscoresData.xpDate && (
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1">
+                    <span>Data de referência (XP Ontem): <strong className="text-slate-700 dark:text-slate-200">{guildHighscoresData.xpDate}</strong></span>
+                    <span>
+                      {(Array.isArray(guildHighscoresData) ? guildHighscoresData : (guildHighscoresData.members || guildHighscoresData.players || guildHighscoresData.highscores || [])).length} jogadores carregados
+                    </span>
+                  </div>
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
@@ -1247,7 +1530,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <th className="py-2.5 px-3">Jogador</th>
                         <th className="py-2.5 px-3">Nível</th>
                         <th className="py-2.5 px-3">Vocação</th>
-                        <th className="py-2.5 px-3 text-right">Experiência / Exp Yesterday</th>
+                        <th className="py-2.5 px-3 text-right">Experiência (Ontem)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
@@ -1268,16 +1551,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           );
                         }
 
-                        return players.map((p: any, idx: number) => (
-                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                            <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white font-sans">{p.name || p.charName || `Jogador #${idx+1}`}</td>
-                            <td className="py-2.5 px-3">{p.level || p.value || 'N/D'}</td>
-                            <td className="py-2.5 px-3 text-blue-600 dark:text-blue-400 font-sans">{p.vocation || 'N/D'}</td>
-                            <td className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 font-black">
-                              {(p.expYesterday ?? p.experience ?? p.exp ?? p.value ?? 0).toLocaleString('pt-BR')} XP
-                            </td>
-                          </tr>
-                        ));
+                        return players.map((p: any, idx: number) => {
+                          const xpVal = p.yesterdayExp ?? p.expYesterday ?? 0;
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                              <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white font-sans">{p.name || p.charName || `Jogador #${idx+1}`}</td>
+                              <td className="py-2.5 px-3">{p.level || p.value || 'N/D'}</td>
+                              <td className="py-2.5 px-3 text-blue-600 dark:text-blue-400 font-sans">{p.vocation || 'N/D'}</td>
+                              <td className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 font-black">
+                                {xpVal > 0 ? `${xpVal.toLocaleString('pt-BR')} XP` : (p.formattedXp || '0 XP')}
+                              </td>
+                            </tr>
+                          );
+                        });
                       })()}
                     </tbody>
                   </table>
@@ -1433,12 +1719,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       )}
 
       {/* Admin Respawn Assignment Modal */}
-      {assignUser && (
+      {isAssignModalOpen && (
         <AdminAssignModal
-          isOpen={Boolean(assignUser)}
+          isOpen={isAssignModalOpen}
           targetUser={assignUser}
+          usersList={usersList}
           reservations={reservations}
-          onClose={() => setAssignUser(null)}
+          customRespawns={customRespawns}
+          onClose={() => {
+            setIsAssignModalOpen(false);
+            setAssignUser(null);
+          }}
           onSuccess={msg => {
             setToastMessage(msg);
             setTimeout(() => setToastMessage(null), 6000);

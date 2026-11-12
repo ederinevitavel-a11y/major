@@ -46,6 +46,7 @@ export interface ReservationSlot {
   respawnName: string;
   userUid: string;
   isOccupied?: boolean;
+  isPublicVisibility?: boolean;
   partyMemberUids?: string[];
   reservedAt: string;
 }
@@ -57,6 +58,7 @@ export interface ReservationDetails {
   userRank: PriorityRank;
   partyMembers?: string;
   partyMemberUids?: string[];
+  isPublicVisibility?: boolean;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -68,6 +70,7 @@ export interface Reservation extends ReservationSlot {
   partyMembers?: string;
   partyMemberUids?: string[];
   notes?: string;
+  exactTime?: string;
 }
 
 export interface TibiaGuildMember {

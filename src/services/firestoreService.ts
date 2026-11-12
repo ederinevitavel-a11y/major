@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { AllowedEmail, Reservation, ReservationSlot, ReservationDetails, UserProfile, HuntDay, DoubleXpSettings, DoubleXpRecord, CustomRespawn, ReleasedRespawn, LfgPost } from '../types';
-import { SUPER_ADMIN_EMAIL } from '../constants/guildData';
+import { SUPER_ADMIN_EMAIL, parseSlotRange } from '../constants/guildData';
 import { DEFAULT_FIXED_SCHEDULE } from '../constants/defaultSchedule';
 
 // ---- ALLOWED EMAILS ----
@@ -201,8 +201,19 @@ export function subscribeToReservations(
   const emit = () => {
     const getCleanName = (name: string) => (name || '').replace(/^[A-Z0-9]+\s*—\s*/, '');
 
+    // Ignore legacy Forgotten Crypt normal/20:40h-23:00h reservations so 22:00h-00:20h stays free
+    const activeSlotsList = slotsList.filter(s => {
+      const cleanRespawn = getCleanName(s.respawnName).trim().toLowerCase();
+      if (s.id.startsWith('fixed-ab1-prezord')) return false;
+      if (cleanRespawn === 'forgotten crypt') {
+        if (s.slotType === 'normal') return false;
+        if ((s.timeSlot || '').includes('20:40')) return false;
+      }
+      return true;
+    });
+
     const firestoreKeySet = new Set(
-      slotsList.flatMap(s => [
+      activeSlotsList.flatMap(s => [
         s.id,
         `${s.day}_${getCleanName(s.respawnName)}_${s.timeSlot}`,
         `${s.day}_${s.slotType}_${getCleanName(s.respawnName)}_${s.timeSlot}`,
@@ -219,7 +230,7 @@ export function subscribeToReservations(
       partyMemberUids: [],
     }));
 
-    const firestoreMerged: Reservation[] = slotsList.map(slot => {
+    const firestoreMerged: Reservation[] = activeSlotsList.map(slot => {
       const isOwner = Boolean(currentUserUid && slot.userUid === currentUserUid);
       const detail = detailsMap.get(slot.id);
       const canSee = isAdmin || isOwner || Boolean(detail);
@@ -227,8 +238,9 @@ export function subscribeToReservations(
       return {
         ...slot,
         respawnName: getCleanName(slot.respawnName),
+        isPublicVisibility: slot.isPublicVisibility || detail?.isPublicVisibility || false,
         partyMemberUids: detail?.partyMemberUids || (slot as unknown as { partyMemberUids?: string[] }).partyMemberUids || [],
-        // Strict Zero-Knowledge: regular members NEVER receive other players' character names, party, or notes!
+        // Strict Zero-Knowledge: regular members NEVER receive other players' character names, party, or notes unless visibility is granted!
         charName: canSee
           ? (detail?.charName || (slot as unknown as { charName?: string }).charName || '')
           : '',
@@ -295,7 +307,7 @@ export function subscribeToReservations(
     // Regular member queries own reservation details + reservation details shared with them
     getAllUserProfiles().then(profiles => {
       const sharedByUids = profiles
-        .filter(p => p.sharedWith && p.sharedWith.includes(currentUserUid))
+        .filter(p => p.sharedWith && (p.sharedWith.includes(currentUserUid) || p.sharedWith.includes('all')))
         .map(p => p.uid);
       
       const allowedUids = Array.from(new Set([currentUserUid, ...sharedByUids])).slice(0, 10);
@@ -343,6 +355,7 @@ export async function setReservation(reservation: Reservation): Promise<void> {
       respawnName: reservation.respawnName,
       userUid: reservation.userUid,
       isOccupied: true,
+      isPublicVisibility: reservation.isPublicVisibility ?? false,
       partyMemberUids: reservation.partyMemberUids || [],
       reservedAt: reservation.reservedAt || new Date().toISOString(),
     };
@@ -355,6 +368,7 @@ export async function setReservation(reservation: Reservation): Promise<void> {
       userRank: reservation.userRank || 'Member',
       partyMembers: reservation.partyMembers || '',
       partyMemberUids: reservation.partyMemberUids || [],
+      isPublicVisibility: reservation.isPublicVisibility ?? false,
       notes: reservation.notes || '',
       createdAt: reservation.reservedAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -365,6 +379,19 @@ export async function setReservation(reservation: Reservation): Promise<void> {
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, pathSlot);
+    throw error;
+  }
+}
+
+export async function updateReservationVisibility(reservationId: string, isPublicVisibility: boolean): Promise<void> {
+  const path = `reservations/${reservationId}`;
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'reservations', reservationId), { isPublicVisibility });
+    batch.update(doc(db, 'reservation_details', reservationId), { isPublicVisibility });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }
 }
@@ -456,6 +483,43 @@ export async function sanitizeLegacyReservations(): Promise<number> {
       await batch.commit();
       console.info(`Sanitized and isolated ${cleanedCount} legacy reservation(s) into private details.`);
     }
+
+    // One-time cleanup for Forgotten Crypt migration to Especiais (19:30–22:00 Prezord, 22:00+ free)
+    const migrationRef = doc(db, 'settings', 'forgotten_crypt_special_v1');
+    const migrationSnap = await getDoc(migrationRef);
+    if (!migrationSnap.exists()) {
+      const cleanupBatch = writeBatch(db);
+      let removedCount = 0;
+
+      for (const d of snap.docs) {
+        const data = d.data() as Record<string, unknown>;
+        const respawnName = String(data.respawnName || '').replace(/^[A-Z0-9]+\s*—\s*/, '').trim().toLowerCase();
+        const timeSlot = String(data.timeSlot || '');
+        const slotType = String(data.slotType || '');
+        const range = parseSlotRange(timeSlot);
+
+        const isLegacyPrezord = d.id.startsWith('fixed-ab1-prezord');
+        const isLegacyForgottenCrypt =
+          respawnName === 'forgotten crypt' &&
+          (slotType === 'normal' || timeSlot.includes('20:40') || range.start >= 1320);
+
+        if (isLegacyPrezord || isLegacyForgottenCrypt) {
+          cleanupBatch.delete(d.ref);
+          cleanupBatch.delete(doc(db, 'reservation_details', d.id));
+          removedCount++;
+        }
+      }
+
+      cleanupBatch.set(migrationRef, {
+        migratedAt: new Date().toISOString(),
+        removedCount,
+      });
+      await cleanupBatch.commit();
+      if (removedCount > 0) {
+        console.info(`Cleaned ${removedCount} legacy Forgotten Crypt reservation(s).`);
+      }
+    }
+
     return cleanedCount;
   } catch (err) {
     console.warn('Legacy reservations sanitization notice:', err);

@@ -102,7 +102,8 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
       setClaimingItem(null);
     } catch (err) {
       console.error('Erro ao aceitar respawn liberado:', err);
-      alert('Ocorreu um erro ao aceitar este respawn. Tente novamente.');
+      setClaimToast('Ocorreu um erro ao aceitar este respawn. Tente novamente.');
+      setTimeout(() => setClaimToast(null), 4500);
     } finally {
       setIsSubmittingClaim(false);
     }

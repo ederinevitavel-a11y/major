@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Header } from './components/Header';
 import { StatsCards } from './components/StatsCards';
@@ -23,7 +23,7 @@ import {
   subscribeToLfgPosts,
 } from './services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from './services/tibiaDataService';
-import { DEFAULT_GUILDS } from './constants/guildData';
+import { DEFAULT_GUILDS, getCanonicalPlayerName } from './constants/guildData';
 import { Reservation, UserProfile, CustomRespawn, ReleasedRespawn, HuntDay, LfgPost, MainTab } from './types';
 import {
   Sparkles,
@@ -225,6 +225,32 @@ const MainDashboard: React.FC = () => {
     return () => unsub();
   }, [currentUser, isAuthorized, isAdmin]);
 
+  // Dynamically link reservations (especially fixed special schedule slots) to registered user accounts by character name
+  const linkedReservations = useMemo(() => {
+    if (!usersList || usersList.length === 0) return reservations;
+    const userByCharName = new Map<string, UserProfile>();
+    usersList.forEach(u => {
+      if (u.charName) {
+        userByCharName.set(u.charName.trim().toLowerCase(), u);
+      }
+    });
+
+    return reservations.map(r => {
+      if (!r.charName) return r;
+      const cleanName = r.charName.trim().toLowerCase();
+      const canonicalName = getCanonicalPlayerName(r.charName).toLowerCase();
+      const matched = userByCharName.get(cleanName) || userByCharName.get(canonicalName);
+      if (matched) {
+        return {
+          ...r,
+          userUid: matched.uid,
+          userRank: matched.rank || r.userRank,
+        };
+      }
+      return r;
+    });
+  }, [reservations, usersList]);
+
   // Loading state
   if (loading) {
     return (
@@ -390,7 +416,7 @@ const MainDashboard: React.FC = () => {
       <main className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5 overflow-x-hidden">
         {/* KPI Stats overview */}
         <StatsCards
-          reservations={reservations}
+          reservations={linkedReservations}
           users={usersList}
           isAdmin={isAdmin}
         />
@@ -398,7 +424,7 @@ const MainDashboard: React.FC = () => {
         {/* Dynamic Tab Content */}
         {currentTab === 'schedule' && (
           <ScheduleGrid
-            reservations={reservations}
+            reservations={linkedReservations}
             usersList={usersList}
             customRespawns={customRespawns}
             initialDay={scheduleDay}
@@ -429,7 +455,7 @@ const MainDashboard: React.FC = () => {
 
         {currentTab === 'my-schedule' && (
           <MyReservations
-            reservations={reservations}
+            reservations={linkedReservations}
             userProfile={userProfile}
             usersList={usersList}
             onUpdateProfile={refreshUsers}
@@ -441,7 +467,7 @@ const MainDashboard: React.FC = () => {
         {currentTab === 'members' && isAdmin && (
           <AdminPanel
             usersList={usersList}
-            reservations={reservations}
+            reservations={linkedReservations}
             onRefreshUsers={refreshUsers}
             customRespawns={customRespawns}
           />
@@ -456,7 +482,7 @@ const MainDashboard: React.FC = () => {
       {/* Export Schedule Modal */}
       {isExportOpen && (
         <ExportModal
-          reservations={reservations}
+          reservations={linkedReservations}
           onClose={() => setIsExportOpen(false)}
         />
       )}

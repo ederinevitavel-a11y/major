@@ -11,9 +11,19 @@ export async function fetchMissclickMembers() {
   }
 }
 
-export async function fetchGuildHighscores() {
+export async function fetchGuildHighscores(
+  playersHint?: Array<{ name: string; level?: number; vocation?: string }>,
+  forceRefresh = false
+) {
   try {
-    const res = await fetch(`${PROXY_BASE}/guild-highscores`);
+    const res =
+      playersHint && playersHint.length > 0
+        ? await fetch(`${PROXY_BASE}/guild-highscores${forceRefresh ? '?force=1' : ''}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ players: playersHint, force: forceRefresh }),
+          })
+        : await fetch(`${PROXY_BASE}/guild-highscores${forceRefresh ? '?force=1' : ''}`);
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     return await res.json();
   } catch (err) {

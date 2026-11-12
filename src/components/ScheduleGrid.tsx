@@ -13,7 +13,9 @@ import {
   getPlanilhadoAllTimeSlots,
   parseStartTime,
   parseDayStartTime,
+  parseSlotRange,
   RANK_METADATA,
+  getCanonicalPlayerName,
 } from '../constants/guildData';
 import { ReservationModal } from './ReservationModal';
 import { ResetScheduleModal } from './ResetScheduleModal';
@@ -31,6 +33,65 @@ import {
   RotateCcw,
   CheckCircle2,
 } from 'lucide-react';
+
+const normalizeRespawnName = (n: string): string =>
+  (n || '')
+    .replace(/^[A-Z0-9]+\s*—\s*/i, '') // remove prefixos tipo AB1 —, B4 —, G1 —
+    .replace(/[()]/g, '')            // remove parênteses
+    .replace(/\bcore\b/gi, '')       // Darklight Core -> Darklight
+    .replace(/\bpolls\b/gi, 'pools') // Sparkling Polls -> Sparkling Pools
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+const isSpecialRespawn = (respawnName: string): boolean => {
+  const norm = normalizeRespawnName(respawnName);
+  return PLANILHADOS_RESPAWNS.some(p => normalizeRespawnName(p) === norm);
+};
+
+const doesReservationMatchSlot = (r: Reservation, targetRespawn: string, targetTime: string, isSpecial: boolean): boolean => {
+  // 1. Respawn match
+  const rNorm = normalizeRespawnName(r.respawnName);
+  const targetNorm = normalizeRespawnName(targetRespawn);
+  if (rNorm !== targetNorm && !rNorm.includes(targetNorm) && !targetNorm.includes(rNorm)) {
+    return false;
+  }
+
+  // 2. Exact string match (ignoring dashes / spaces / casing)
+  const normSlot = (s: string) => (s || '').replace(/[\s–\-—]/g, '').toLowerCase();
+  if (normSlot(r.timeSlot) === normSlot(targetTime)) return true;
+  if (r.exactTime && normSlot(r.exactTime) === normSlot(targetTime)) return true;
+
+  // 3. Notes match (e.g. "Horário Planilhado: 18:00 – 20:00")
+  if (r.notes) {
+    const notesMatch = r.notes.match(/(\d{1,2}:\d{2})\s*(?:–|-|às|as|\s)\s*(\d{1,2}:\d{2})/i);
+    if (notesMatch) {
+      const notesSlot = `${notesMatch[1]}h – ${notesMatch[2]}h`;
+      if (normSlot(notesSlot) === normSlot(targetTime)) return true;
+    }
+  }
+
+  // 4. Minute Range Overlap for Specials
+  // If targetTime overlaps significantly with the reservation's actual hunting time
+  const targetRange = parseSlotRange(targetTime);
+  const resTime = r.exactTime || (r.notes && r.notes.match(/Horário Planilhado:\s*([^\s(]+(?:\s*[–\-]\s*[^\s(]+)?)/i)?.[1]) || r.timeSlot;
+  const resRange = parseSlotRange(resTime);
+
+  if (targetRange.start > 0 && resRange.start > 0) {
+    // Exact start and end
+    if (targetRange.start === resRange.start && targetRange.end === resRange.end) {
+      return true;
+    }
+    // Check overlap
+    const overlapStart = Math.max(targetRange.start, resRange.start);
+    const overlapEnd = Math.min(targetRange.end, resRange.end);
+    if (overlapEnd - overlapStart >= 20) {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 interface ScheduleGridProps {
   reservations: Reservation[];
@@ -50,6 +111,59 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   const { currentUser, isAdmin, userProfile } = useAuth();
   const isLeader = userProfile?.rank === 'Leader';
   const canBookRespawn = isAdmin || isLeader;
+
+  // Privacy helper: only admins and the slot owner can view names and private reservation details
+  const checkIsOwner = (res?: Reservation | null): boolean => {
+    if (!res || !currentUser) return false;
+    if (res.userUid === currentUser.uid) return true;
+    if (userProfile?.charName && res.charName) {
+      const myName = userProfile.charName.trim().toLowerCase();
+      const resName = res.charName.trim().toLowerCase();
+      const canonicalResName = getCanonicalPlayerName(res.charName).toLowerCase();
+      return resName === myName || canonicalResName === myName;
+    }
+    return false;
+  };
+
+  // Visibility Rule:
+  // Admins and the slot owner can always view who is in the respawn.
+  // Regular members can ONLY view who is in the respawn if visibility was liberated:
+  // - Via the "Dê visibilidade" button (sharedWith includes current user or 'all')
+  // - Via party member assignment (partyMemberUids includes current user)
+  // - Via public reservation visibility flag (isPublicVisibility === true)
+  const checkCanSeeDetails = (res?: Reservation | null): boolean => {
+    if (!res) return false;
+    if (isAdmin) return true;
+    if (!currentUser) return false;
+    if (checkIsOwner(res)) return true;
+
+    // 1. If reservation explicitly has public visibility turned on
+    if (res.isPublicVisibility === true) return true;
+
+    // 2. If current user is in party members
+    if (res.partyMemberUids && res.partyMemberUids.includes(currentUser.uid)) {
+      return true;
+    }
+
+    // 3. If owner liberated visibility via "Dê visibilidade" button in userProfile.sharedWith
+    const canonicalResChar = getCanonicalPlayerName(res.charName).toLowerCase();
+    const owner = usersList.find(
+      u =>
+        u.uid === res.userUid ||
+        (res.charName &&
+          u.charName &&
+          (u.charName.trim().toLowerCase() === res.charName.trim().toLowerCase() ||
+            u.charName.trim().toLowerCase() === canonicalResChar))
+    );
+
+    if (owner && owner.sharedWith && owner.sharedWith.length > 0) {
+      if (owner.sharedWith.includes('all') || owner.sharedWith.includes(currentUser.uid)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
 
   const [selectedDay, setSelectedDay] = useState<HuntDay>(initialDay || 'friday');
   const [slotType, setSlotType] = useState<SlotType>('normal');
@@ -115,23 +229,83 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     respawn.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Helper to find reservation
+  // Helper to find reservation with smart cross-matching
   const getReservation = (day: HuntDay, type: SlotType, respawn: string, time: string) => {
-    return reservations.find(
-      r =>
-        r.day === day &&
-        r.slotType === type &&
-        (r.respawnName === respawn ||
-         r.respawnName.includes(respawn) ||
-         respawn.includes(r.respawnName) ||
-         r.respawnName.replace(/^[A-Z0-9]+\s*—\s*/, '') === respawn) &&
-        r.timeSlot === time
-    );
+    const isSpecial = type === 'planilhados' || isSpecialRespawn(respawn);
+
+    return reservations.find(r => {
+      if (r.day !== day) return false;
+
+      // For special respawns, match regardless of legacy slotType ('planilhados', '3h', 'normal')
+      if (isSpecial) {
+        return doesReservationMatchSlot(r, respawn, time, true);
+      }
+
+      // For regular slots, must match slotType
+      if (r.slotType !== type) return false;
+      return doesReservationMatchSlot(r, respawn, time, false);
+    });
+  };
+
+  // Dedicated helper to get clean, deduplicated time slots for special respawns without phantom free slots
+  const getDeduplicatedPlanilhadoSlots = (respawnName: string, day: HuntDay): string[] => {
+    const baseSlots = getPlanilhadoAllTimeSlots(respawnName);
+    const extraSlots = reservations
+      .filter(r => {
+        if (r.day !== day) return false;
+        if (!doesReservationMatchSlot(r, respawnName, r.timeSlot, true)) return false;
+        // Do not inject r.timeSlot if one of the baseSlots already matches this reservation!
+        const alreadyMatched = baseSlots.some(b => doesReservationMatchSlot(r, respawnName, b, true));
+        return !alreadyMatched;
+      })
+      .map(r => r.timeSlot);
+
+    const candidates = Array.from(new Set([...baseSlots, ...extraSlots]))
+      .filter(Boolean)
+      .sort((a, b) => parseDayStartTime(a) - parseDayStartTime(b));
+
+    const seenResIds = new Set<string>();
+    const result: string[] = [];
+
+    for (const s of candidates) {
+      const res = getReservation(day, 'planilhados', respawnName, s);
+      if (res) {
+        if (seenResIds.has(res.id)) {
+          continue;
+        }
+        seenResIds.add(res.id);
+        result.push(s);
+      } else {
+        // Defensive check: verify if this supposedly "free" slot overlaps with ANY occupied reservation in this respawn on this day
+        const sRange = parseSlotRange(s);
+        const overlapsOccupied = reservations.some(r => {
+          if (r.day !== day) return false;
+          if (!doesReservationMatchSlot(r, respawnName, r.timeSlot, true)) return false;
+          const rTime = r.exactTime || (r.notes && r.notes.match(/Horário Planilhado:\s*([^\s(]+(?:\s*[–\-]\s*[^\s(]+)?)/i)?.[1]) || r.timeSlot;
+          const rRange = parseSlotRange(rTime);
+          if (sRange.start > 0 && rRange.start > 0) {
+            const oStart = Math.max(sRange.start, rRange.start);
+            const oEnd = Math.min(sRange.end, rRange.end);
+            return (oEnd - oStart) >= 20;
+          }
+          return false;
+        });
+
+        if (overlapsOccupied) {
+          // Skip showing this slot as free since the respawn is occupied during this time window!
+          continue;
+        }
+
+        result.push(s);
+      }
+    }
+
+    return result;
   };
 
   const handleCellClick = (respawn: string, time: string) => {
     const existing = getReservation(selectedDay, slotType, respawn, time);
-    const isOwner = Boolean(existing && currentUser && existing.userUid === currentUser.uid);
+    const isOwner = checkIsOwner(existing);
 
     if (!canBookRespawn && !existing) {
       return;
@@ -354,7 +528,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
           {filteredRespawns.map(respawn => {
             const respawnTimeSlots = slotType === 'planilhados'
-              ? getPlanilhadoAllTimeSlots(respawn)
+              ? getDeduplicatedPlanilhadoSlots(respawn, selectedDay)
               : activeTimeSlots;
 
             const colorMeta = slotType === 'planilhados' ? PLANILHADOS_COLOR_MAP[respawn] : null;
@@ -394,8 +568,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                     if (statusFilter === 'free' && res) return null;
                     if (statusFilter === 'reserved' && !res) return null;
 
-                    const isOwner = Boolean(res && currentUser && res.userUid === currentUser.uid);
-                    const canSeeDetails = isAdmin || isOwner || Boolean(res?.charName);
+                    const isOwner = checkIsOwner(res);
+                    const canSeeDetails = checkCanSeeDetails(res);
 
                     return (
                       <button
@@ -510,8 +684,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
               if (statusFilter === 'free' && res) return null;
               if (statusFilter === 'reserved' && !res) return null;
 
-              const isOwner = Boolean(res && currentUser && res.userUid === currentUser.uid);
-              const canSeeDetails = isAdmin || isOwner || Boolean(res?.charName);
+              const isOwner = checkIsOwner(res);
+              const canSeeDetails = checkCanSeeDetails(res);
               const colorMeta = slotType === 'planilhados' ? PLANILHADOS_COLOR_MAP[respawn] : null;
 
               return (
@@ -619,7 +793,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                   {filteredRespawns.map(respawn => {
-                    const respawnTimeSlots = getPlanilhadoAllTimeSlots(respawn);
+                    const respawnTimeSlots = getDeduplicatedPlanilhadoSlots(respawn, selectedDay);
 
                     return (
                       <tr key={respawn} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
@@ -641,8 +815,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                               if (statusFilter === 'free' && res) return null;
                               if (statusFilter === 'reserved' && !res) return null;
 
-                              const isOwner = Boolean(res && currentUser && res.userUid === currentUser.uid);
-                              const canSeeDetails = isAdmin || isOwner || Boolean(res?.charName);
+                              const isOwner = checkIsOwner(res);
+                              const canSeeDetails = checkCanSeeDetails(res);
 
                               return (
                                 <button
@@ -794,8 +968,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                             );
                           }
 
-                          const isOwner = Boolean(res && currentUser && res.userUid === currentUser.uid);
-                          const canSeeDetails = isAdmin || isOwner || Boolean(res?.charName);
+                          const isOwner = checkIsOwner(res);
+                          const canSeeDetails = checkCanSeeDetails(res);
 
                           return (
                             <td key={time} className="p-1.5 text-center align-middle">

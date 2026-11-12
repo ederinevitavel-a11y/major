@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, UserProfile, LfgPost, HuntDay } from '../types';
-import { Calendar, Clock, MapPin, User, Shield, CheckCircle2, Users, Eye, Share2, Plus, X, UserPlus, Search, Settings, RefreshCw, Zap, Award, TrendingUp, UserCheck, Settings2, Trash2, AlertTriangle, Loader2, Swords, Phone, Pencil, MessageCircle, Flame } from 'lucide-react';
-import { DAYS_CONFIG, RANK_METADATA } from '../constants/guildData';
-import { updateUserProfile, addReleasedRespawn, deleteReservation, deleteLfgPost } from '../services/firestoreService';
+import { Calendar, Clock, MapPin, User, Shield, CheckCircle2, Users, Eye, Share2, Plus, X, UserPlus, Search, Settings, RefreshCw, Zap, Award, TrendingUp, UserCheck, Settings2, Trash2, AlertTriangle, Loader2, Swords, Phone, Pencil, MessageCircle, Flame, Lock } from 'lucide-react';
+import { DAYS_CONFIG, RANK_METADATA, getCanonicalPlayerName } from '../constants/guildData';
+import { updateUserProfile, addReleasedRespawn, deleteReservation, deleteLfgPost, updateReservationVisibility } from '../services/firestoreService';
 import { fetchCharacter, TibiaCharacterInfo } from '../services/tibiaDataService';
 import { fetchCharacterHighscores } from '../services/missclickApi';
 import { useAuth } from '../context/AuthContext';
@@ -62,7 +62,9 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
   const handleOpenReleaseConfirm = (res: Reservation) => {
     const isMarkedPlayer =
-      (userProfile?.charName && res.charName?.trim().toLowerCase() === userProfile.charName.trim().toLowerCase()) ||
+      (userProfile?.charName &&
+        (res.charName?.trim().toLowerCase() === userProfile.charName.trim().toLowerCase() ||
+          getCanonicalPlayerName(res.charName).toLowerCase() === userProfile.charName.trim().toLowerCase())) ||
       (userProfile?.uid && res.userUid === userProfile.uid);
     const canRelease = isMarkedPlayer || userProfile?.rank === 'Leader' || Boolean(userProfile?.isAdmin);
 
@@ -105,6 +107,30 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
     }
   };
 
+  const [updatingVisId, setUpdatingVisId] = useState<string | null>(null);
+
+  const handleToggleVisibility = async (res: Reservation) => {
+    if (!res.id) return;
+    setUpdatingVisId(res.id);
+    try {
+      const nextVal = !res.isPublicVisibility;
+      await updateReservationVisibility(res.id, nextVal);
+      res.isPublicVisibility = nextVal;
+      setShareToast(
+        nextVal
+          ? `Visibilidade liberada: Seu nome agora está visível para a guilda neste respawn.`
+          : `Visibilidade privada: Membros comuns agora veem apenas "Ocupado" com cadeado.`
+      );
+      setTimeout(() => setShareToast(null), 4500);
+    } catch (err) {
+      console.error('Erro ao alternar visibilidade:', err);
+      setShareToast('Erro ao atualizar visibilidade da reserva.');
+      setTimeout(() => setShareToast(null), 3000);
+    } finally {
+      setUpdatingVisId(null);
+    }
+  };
+
   useEffect(() => {
     if (userProfile?.sharedWith !== undefined) {
       setSharingUids(userProfile.sharedWith || []);
@@ -119,28 +145,45 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
     if (!userProfile?.charName) return;
     setLoadingXp(true);
     try {
+      // 1. Fetch yesterday's XP from highscores / missclick API
       const hsData = await fetchCharacterHighscores(userProfile.charName);
-      if (hsData) {
-        const yesterdayExp = hsData.expYesterday ?? hsData.exp_yesterday ?? hsData.exp ?? hsData.experience ?? hsData.value ?? 0;
-        setCharInfo({
-          name: hsData.name || userProfile.charName,
-          level: hsData.level || userProfile.level,
-          experience: yesterdayExp,
-          vocation: hsData.vocation || userProfile.vocation,
-          world: hsData.world || '',
-        });
-        setXpToast('Experiência feita ontem obtida da API!');
+
+      // 2. Also fetch character details from TibiaData for current level, vocation, world, and total exp
+      const info = await fetchCharacter(userProfile.charName);
+
+      const yesterdayExp = typeof hsData?.yesterdayExp === 'number'
+        ? hsData.yesterdayExp
+        : typeof hsData?.expYesterday === 'number'
+        ? hsData.expYesterday
+        : typeof hsData?.exp_yesterday === 'number'
+        ? hsData.exp_yesterday
+        : undefined;
+
+      const xpDate = hsData?.xpDate || hsData?.date || undefined;
+
+      setCharInfo({
+        name: info?.name || hsData?.name || userProfile.charName,
+        level: info?.level || hsData?.level || userProfile.level,
+        experience: info?.experience || 0,
+        yesterdayExp: yesterdayExp !== undefined ? yesterdayExp : 0,
+        xpDate,
+        vocation: info?.vocation || hsData?.vocation || userProfile.vocation,
+        world: info?.world || hsData?.world || '',
+      });
+
+      if (yesterdayExp !== undefined && yesterdayExp > 0) {
+        setXpToast('Experiência feita ontem obtida com sucesso!');
         setTimeout(() => setXpToast(null), 3000);
-      } else {
-        const info = await fetchCharacter(userProfile.charName);
-        if (info) {
-          setCharInfo(info);
-        }
       }
     } catch (err) {
       console.warn('Erro ao buscar XP de ontem:', err);
       const info = await fetchCharacter(userProfile.charName);
-      if (info) setCharInfo(info);
+      if (info) {
+        setCharInfo({
+          ...info,
+          yesterdayExp: 0,
+        });
+      }
     } finally {
       setLoadingXp(false);
     }
@@ -164,19 +207,25 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
         if (u && u.charName) {
           try {
             const hsData = await fetchCharacterHighscores(u.charName);
-            if (hsData) {
-              const yesterdayExp = hsData.expYesterday ?? hsData.exp_yesterday ?? hsData.exp ?? hsData.experience ?? hsData.value ?? 0;
-              newMap[uid] = {
-                name: hsData.name || u.charName,
-                level: hsData.level || u.level,
-                experience: yesterdayExp,
-                vocation: hsData.vocation || u.vocation,
-                world: '',
-              };
-            } else {
-              const info = await fetchCharacter(u.charName);
-              if (info) newMap[uid] = info;
-            }
+            const info = await fetchCharacter(u.charName);
+
+            const yesterdayExp = typeof hsData?.yesterdayExp === 'number'
+              ? hsData.yesterdayExp
+              : typeof hsData?.expYesterday === 'number'
+              ? hsData.expYesterday
+              : typeof hsData?.exp_yesterday === 'number'
+              ? hsData.exp_yesterday
+              : undefined;
+
+            newMap[uid] = {
+              name: info?.name || hsData?.name || u.charName,
+              level: info?.level || hsData?.level || u.level,
+              experience: info?.experience || 0,
+              yesterdayExp: yesterdayExp !== undefined ? yesterdayExp : 0,
+              xpDate: hsData?.xpDate || hsData?.date || undefined,
+              vocation: info?.vocation || hsData?.vocation || u.vocation,
+              world: info?.world || hsData?.world || '',
+            };
           } catch {
             // ignore
           }
@@ -248,9 +297,10 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
   const myReservations = reservations.filter(res => {
     const resChar = res.charName?.trim().toLowerCase() || '';
+    const canonicalResChar = getCanonicalPlayerName(res.charName).toLowerCase();
     const resUserId = res.userUid || '';
     return (
-      (myCharName && resChar === myCharName) ||
+      (myCharName && (resChar === myCharName || canonicalResChar === myCharName)) ||
       (myUserId && resUserId === myUserId)
     );
   });
@@ -271,6 +321,16 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
   const filteredSharedByDay = sharedReservations.filter(res => res.day === selectedDay);
 
   const otherUsers = usersList.filter(u => u.uid !== myUserId);
+
+  const isSharedWithAll = sharingUids.includes('all');
+
+  const toggleShareWithAll = () => {
+    if (isSharedWithAll) {
+      updateSharing(sharingUids.filter(id => id !== 'all'));
+    } else {
+      updateSharing([...sharingUids, 'all']);
+    }
+  };
 
   const selectedPartyMembers = otherUsers
     .filter(u => sharingUids.includes(u.uid))
@@ -344,9 +404,10 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
             type="button"
             onClick={() => setIsPartyManageOpen(true)}
             className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-[#2160FF] hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/25 transition-all cursor-pointer"
+            title="Liberar visibilidade dos seus respawns para outros membros ou para toda a guilda"
           >
-            <Settings className="h-4 w-4" />
-            <span>Dê visibilidade ({selectedPartyMembers.length})</span>
+            <Eye className="h-4 w-4" />
+            <span>Dê visibilidade ({isSharedWithAll ? 'Toda Guilda' : `${selectedPartyMembers.length} membro(s)`})</span>
           </button>
         </div>
       </div>
@@ -377,8 +438,17 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
           <div>
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Experiência (Ontem)</span>
             <span className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-              {charInfo?.experience ? charInfo.experience.toLocaleString('pt-BR') : (userProfile?.level ? 'Sincronizando...' : 'N/D')} XP
+              {loadingXp
+                ? 'Sincronizando...'
+                : typeof charInfo?.yesterdayExp === 'number'
+                ? `${charInfo.yesterdayExp.toLocaleString('pt-BR')} XP`
+                : '0 XP'}
             </span>
+            {charInfo?.xpDate && (
+              <span className="text-[10px] text-slate-400 block mt-0.5">
+                Data: {charInfo.xpDate}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -441,9 +511,13 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
                   <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
                     <div>
-                      <span className="text-[9px] uppercase font-bold text-slate-400 block">Experiência</span>
+                      <span className="text-[9px] uppercase font-bold text-slate-400 block">Experiência (Ontem)</span>
                       <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                        {loadingTracked && !info ? 'Carregando...' : info?.experience ? info.experience.toLocaleString('pt-BR') + ' XP' : 'N/D'}
+                        {loadingTracked && !info
+                          ? 'Carregando...'
+                          : typeof info?.yesterdayExp === 'number'
+                          ? `${info.yesterdayExp.toLocaleString('pt-BR')} XP`
+                          : '0 XP'}
                       </span>
                     </div>
                     <div className="text-right">
@@ -755,20 +829,54 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                       <div className="text-xs font-bold text-slate-700 dark:text-slate-300">{res.charName}</div>
                       <div className="text-[10px] text-slate-400 font-mono">Editar/Party</div>
                     </div>
-                    {((userProfile?.charName && res.charName?.trim().toLowerCase() === userProfile.charName.trim().toLowerCase()) || res.userUid === userProfile?.uid || userProfile?.rank === 'Leader' || userProfile?.isAdmin) && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          handleOpenReleaseConfirm(res);
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 shrink-0"
-                        title="Liberar este respawn para a guild"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                        <span>Liberar Respawn</span>
-                      </button>
+                    {((userProfile?.charName && (res.charName?.trim().toLowerCase() === userProfile.charName.trim().toLowerCase() || getCanonicalPlayerName(res.charName).toLowerCase() === userProfile.charName.trim().toLowerCase())) || res.userUid === userProfile?.uid || userProfile?.rank === 'Leader' || userProfile?.isAdmin) && (
+                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleToggleVisibility(res);
+                          }}
+                          disabled={updatingVisId === res.id}
+                          className={`px-2 py-1.5 rounded-lg text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 shrink-0 ${
+                            res.isPublicVisibility
+                              ? 'bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900/90 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
+                              : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
+                          }`}
+                          title={
+                            res.isPublicVisibility
+                              ? 'Visível para a guilda. Clique para ocultar o seu nome (mostrar apenas Ocupado para membros).'
+                              : 'Privado para membros comuns (mostra apenas Ocupado com cadeado). Clique para liberar visibilidade do seu nome.'
+                          }
+                        >
+                          {res.isPublicVisibility ? (
+                            <>
+                              <Eye className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                              <span>Visível na Guild</span>
+                            </>
+                          ) : (
+                            <>
+                              <Lock className="h-3 w-3 text-slate-500" />
+                              <span>Ocupado (Privado)</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleOpenReleaseConfirm(res);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                          title="Liberar este respawn para a guild"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          <span>Liberar Respawn</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -946,6 +1054,32 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Global Guild Visibility Toggle */}
+            <div className="p-3.5 rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/60 dark:bg-blue-950/40 flex items-center justify-between gap-3">
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex items-center gap-2">
+                  <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="text-xs font-bold text-slate-900 dark:text-white">
+                    Liberar visibilidade para todos os membros
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                  Quando ativo, todos os membros da guilda poderão ver seu nome nos seus respawns. Quando desativado, apenas os membros selecionados abaixo (ou admins) verão seu nome.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={toggleShareWithAll}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                  isSharedWithAll
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-300'
+                }`}
+              >
+                {isSharedWithAll ? 'Liberado (Toda Guild)' : 'Apenas Selecionados'}
               </button>
             </div>
 
