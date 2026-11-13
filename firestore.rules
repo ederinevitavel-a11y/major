@@ -361,8 +361,7 @@ service cloud.firestore {
          (isOwner(existing().userUid) && incoming().diff(existing()).affectedKeys().hasOnly(['isPublicVisibility'])));
       allow delete: if isWhitelisted() &&
         isValidId(reservationId) &&
-        resource != null &&
-        (isAdmin() || existing().userUid == request.auth.uid);
+        (isAdmin() || (resource != null && existing().userUid == request.auth.uid));
     }
 
     // Sensitive Reservation Details (Character Name, Party Members, Notes)
@@ -391,8 +390,7 @@ service cloud.firestore {
          ])));
       allow delete: if isWhitelisted() &&
         isValidId(reservationId) &&
-        resource != null &&
-        (isAdmin() || existing().userUid == request.auth.uid);
+        (isAdmin() || (resource != null && existing().userUid == request.auth.uid));
     }
 
     // Global Settings (e.g. double_xp, system_status)
@@ -441,14 +439,15 @@ service cloud.firestore {
         isValidReleasedRespawn(incoming(), releasedId);
       allow delete: if isWhitelisted() &&
         isValidId(releasedId) &&
-        resource != null &&
         (isAdmin() ||
-         existing().userUid == request.auth.uid ||
-         ('claimReservationId' in existing() &&
-          existing().claimReservationId is string &&
-          isValidId(existing().claimReservationId) &&
-          existsAfter(/databases/$(database)/documents/reservations/$(existing().claimReservationId)) &&
-          getAfter(/databases/$(database)/documents/reservations/$(existing().claimReservationId)).data.userUid == request.auth.uid));
+         (resource != null && (
+           existing().userUid == request.auth.uid ||
+           ('claimReservationId' in existing() &&
+            existing().claimReservationId is string &&
+            isValidId(existing().claimReservationId) &&
+            existsAfter(/databases/$(database)/documents/reservations/$(existing().claimReservationId)) &&
+            getAfter(/databases/$(database)/documents/reservations/$(existing().claimReservationId)).data.userUid == request.auth.uid)
+         )));
     }
 
     // Quero Hunt! (LFG Posts - Whitelisted guild members only)
@@ -464,8 +463,7 @@ service cloud.firestore {
         (isAdmin() || (existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid));
       allow delete: if isWhitelisted() &&
         isValidId(postId) &&
-        resource != null &&
-        (isAdmin() || existing().userUid == request.auth.uid);
+        (isAdmin() || (resource != null && existing().userUid == request.auth.uid));
     }
 
     // Admin Backups of Special Respawns Configuration (Strictly Admin-only)

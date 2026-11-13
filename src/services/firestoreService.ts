@@ -12,6 +12,8 @@ import {
   Unsubscribe,
   writeBatch,
   deleteField,
+  arrayUnion,
+  arrayRemove,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { AllowedEmail, Reservation, ReservationSlot, ReservationDetails, UserProfile, MemberDirectoryProfile, HuntDay, DoubleXpSettings, DoubleXpRecord, CustomRespawn, ReleasedRespawn, LfgPost, SpecialRespawnsBackup } from '../types';
@@ -380,6 +382,7 @@ export function subscribeToReservations(
   onError?: (err: unknown) => void
 ): Unsubscribe {
   let slotsList: ReservationSlot[] = [];
+  let deletedFixedIds = new Set<string>();
   const ownDetailsMap = new Map<string, ReservationDetails>();
   const publicDetailsMap = new Map<string, ReservationDetails>();
   const partyDetailsMap = new Map<string, ReservationDetails>();
@@ -433,6 +436,7 @@ export function subscribeToReservations(
 
     const fixedNotOverridden: Reservation[] = DEFAULT_FIXED_SCHEDULE.filter(
       fixed =>
+        !deletedFixedIds.has(fixed.id) &&
         !firestoreKeySet.has(fixed.id) &&
         !firestoreKeySet.has(`${fixed.day}_${getCleanName(fixed.respawnName)}_${fixed.timeSlot}`) &&
         !firestoreKeySet.has(`${fixed.day}_${fixed.slotType}_${getCleanName(fixed.respawnName)}_${fixed.timeSlot}`)
@@ -495,6 +499,19 @@ export function subscribeToReservations(
     error => {
       if (onError) onError(error);
       handleFirestoreError(error, OperationType.LIST, 'reservations');
+    }
+  );
+
+  // 1b. Subscribe to deleted fixed schedule overrides
+  const unsubDeletedFixed = onSnapshot(
+    doc(db, 'settings', 'deleted_fixed_reservations'),
+    snapshot => {
+      const data = snapshot.data() as { ids?: string[] } | undefined;
+      deletedFixedIds = new Set(Array.isArray(data?.ids) ? data.ids : []);
+      emit();
+    },
+    error => {
+      console.warn('Deleted fixed schedule subscription:', error);
     }
   );
 
@@ -586,6 +603,7 @@ export function subscribeToReservations(
 
   return () => {
     unsubSlots();
+    unsubDeletedFixed();
     if (unsubDetails) unsubDetails();
     if (unsubPublicDetails) unsubPublicDetails();
     if (unsubPartyDetails) unsubPartyDetails();
@@ -647,6 +665,13 @@ export async function setReservation(reservation: Reservation): Promise<void> {
 
     batch.set(doc(db, 'reservations', reservation.id), cleanData(publicSlot));
     batch.set(doc(db, 'reservation_details', reservation.id), cleanData(privateDetails));
+    if (reservation.id.startsWith('fixed-') || DEFAULT_FIXED_SCHEDULE.some(f => f.id === reservation.id)) {
+      batch.set(
+        doc(db, 'settings', 'deleted_fixed_reservations'),
+        { ids: arrayRemove(reservation.id), updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    }
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, pathSlot);
@@ -669,19 +694,42 @@ export async function updateReservationVisibility(reservationId: string, isPubli
 
 export async function deleteReservation(reservationId: string): Promise<void> {
   const path = `reservations/${reservationId}`;
+  const isFixedScheduleItem =
+    reservationId.startsWith('fixed-') ||
+    DEFAULT_FIXED_SCHEDULE.some(f => f.id === reservationId);
+
   try {
+    const [slotSnap, detailSnap] = await Promise.all([
+      getDoc(doc(db, 'reservations', reservationId)),
+      getDoc(doc(db, 'reservation_details', reservationId)),
+    ]);
+
     const batch = writeBatch(db);
-    batch.delete(doc(db, 'reservations', reservationId));
-    batch.delete(doc(db, 'reservation_details', reservationId));
-    await batch.commit();
-  } catch (error) {
-    try {
-      await deleteDoc(doc(db, 'reservations', reservationId));
-      await deleteDoc(doc(db, 'reservation_details', reservationId));
-    } catch {
-      handleFirestoreError(error, OperationType.DELETE, path);
-      throw error;
+    let hasOps = false;
+
+    if (slotSnap.exists()) {
+      batch.delete(doc(db, 'reservations', reservationId));
+      hasOps = true;
     }
+    if (detailSnap.exists()) {
+      batch.delete(doc(db, 'reservation_details', reservationId));
+      hasOps = true;
+    }
+    if (isFixedScheduleItem) {
+      batch.set(
+        doc(db, 'settings', 'deleted_fixed_reservations'),
+        { ids: arrayUnion(reservationId), updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+      hasOps = true;
+    }
+
+    if (hasOps) {
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
   }
 }
 
@@ -695,9 +743,10 @@ export async function clearAllReservations(dayFilter?: HuntDay): Promise<number>
       return data.day === dayFilter;
     });
 
-    if (toDelete.length === 0) return 0;
+    const fixedIdsForScope = DEFAULT_FIXED_SCHEDULE.filter(
+      f => !dayFilter || f.day === dayFilter
+    ).map(f => f.id);
 
-    // Firestore batch limit is 500 operations (2 ops per slot: slot + details)
     const batchSize = 200;
     for (let i = 0; i < toDelete.length; i += batchSize) {
       const chunk = toDelete.slice(i, i + batchSize);
@@ -708,7 +757,16 @@ export async function clearAllReservations(dayFilter?: HuntDay): Promise<number>
       });
       await batch.commit();
     }
-    return toDelete.length;
+
+    if (fixedIdsForScope.length > 0) {
+      await setDoc(
+        doc(db, 'settings', 'deleted_fixed_reservations'),
+        { ids: arrayUnion(...fixedIdsForScope), updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    }
+
+    return toDelete.length + fixedIdsForScope.length;
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
@@ -1393,6 +1451,13 @@ export async function restoreSpecialRespawnsBackup(
         await customBatch.commit();
       }
     }
+
+    // 4. Clear deleted fixed schedule overrides when restoring special respawns backup
+    await setDoc(
+      doc(db, 'settings', 'deleted_fixed_reservations'),
+      { ids: [], updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
 
     return validReservations.length;
   } catch (error) {
