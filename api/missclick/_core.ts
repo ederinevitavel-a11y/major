@@ -10,9 +10,24 @@ export interface ApiRequest {
 }
 
 export interface ApiResponse {
+  statusCode?: number;
   setHeader(name: string, value: string): unknown;
-  status(code: number): ApiResponse;
-  json(data: unknown): unknown;
+  status?(code: number): ApiResponse;
+  json?(data: unknown): unknown;
+  end?(chunk?: string): unknown;
+}
+
+function sendJson(res: ApiResponse, statusCode: number, data: unknown) {
+  if (typeof res.status === 'function' && typeof res.json === 'function') {
+    const statusRes = res.status(statusCode);
+    if (statusRes && typeof statusRes.json === 'function') {
+      return statusRes.json(data);
+    }
+    return res.json(data);
+  }
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  return res.end?.(JSON.stringify(data));
 }
 
 interface FirebaseConfigFile {
@@ -21,10 +36,16 @@ interface FirebaseConfigFile {
 }
 
 function loadFirebaseConfig(): FirebaseConfigFile {
-  const candidates = [
-    new URL('../../firebase-applet-config.json', import.meta.url),
+  const candidates: string[] = [
     path.resolve(process.cwd(), 'firebase-applet-config.json'),
   ];
+  try {
+    if (typeof __dirname === 'string' && __dirname) {
+      candidates.push(path.resolve(__dirname, '../../firebase-applet-config.json'));
+    }
+  } catch {
+    // ignore if __dirname is unavailable in strict ESM
+  }
   for (const candidate of candidates) {
     try {
       if (fs.existsSync(candidate)) {
@@ -237,22 +258,22 @@ export async function authenticateRequest(
     const authHeader = Array.isArray(rawHeader) ? rawHeader[0] || '' : rawHeader;
     const match = authHeader.match(/^Bearer\s+(.+)$/i);
     if (!match) {
-      res.status(401).json({ error: 'Autenticação necessária.' });
+      sendJson(res, 401, { error: 'Autenticação necessária.' });
       return null;
     }
     const idToken = match[1].trim();
     const verifiedUser = await verifyFirebaseIdToken(idToken);
     if (!verifiedUser) {
-      res.status(401).json({ error: 'Token de sessão inválido ou expirado.' });
+      sendJson(res, 401, { error: 'Token de sessão inválido ou expirado.' });
       return null;
     }
     const access = await checkWhitelistAccess(verifiedUser, idToken);
     if (!access.authorized) {
-      res.status(403).json({ error: 'Usuário sem permissão na guilda.' });
+      sendJson(res, 403, { error: 'Usuário sem permissão na guilda.' });
       return null;
     }
     if (!checkUserRateLimit(verifiedUser.uid)) {
-      res.status(429).json({ error: 'Muitas requisições. Aguarde um instante.' });
+      sendJson(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
       return null;
     }
     return {
@@ -261,7 +282,7 @@ export async function authenticateRequest(
     };
   } catch (err) {
     console.error('Auth middleware error:', err);
-    res.status(401).json({ error: 'Falha ao validar autenticação.' });
+    sendJson(res, 401, { error: 'Falha ao validar autenticação.' });
     return null;
   }
 }
@@ -394,7 +415,7 @@ function getQueryString(query: Record<string, unknown> | undefined, key: string)
 
 export async function handleMembersRequest(req: ApiRequest, res: ApiResponse) {
   if (req.method && req.method !== 'GET') {
-    return res.status(405).json({ error: 'Método não permitido.' });
+    return sendJson(res, 405, { error: 'Método não permitido.' });
   }
   const user = await authenticateRequest(req, res);
   if (!user) return;
@@ -411,25 +432,38 @@ export async function handleMembersRequest(req: ApiRequest, res: ApiResponse) {
         apiRateLimitedUntil = Date.now() + 10 * 60 * 1000;
       } else if (response.ok) {
         const data = await response.json();
-        return res.status(response.status).json(data);
+        return sendJson(res, response.status, data);
       }
     }
 
     const tdRes = await fetch('https://api.tibiadata.com/v4/guild/Missclick');
     if (tdRes.ok) {
       const tdData = await tdRes.json();
-      return res.json({ members: tdData?.guild?.members || [], source: 'tibiadata-fallback' });
+      return sendJson(res, 200, { members: tdData?.guild?.members || [], source: 'tibiadata-fallback' });
     }
-    return res.status(502).json({ error: 'Não foi possível carregar os membros.' });
+    return sendJson(res, 502, { error: 'Não foi possível carregar os membros.' });
   } catch (err) {
     console.error('Error proxying /members:', err);
-    return res.status(500).json({ error: 'Erro interno do servidor.' });
+    return sendJson(res, 500, { error: 'Erro interno do servidor.' });
   }
+}
+
+function parseRequestBody(rawBody: any): Record<string, any> {
+  if (!rawBody) return {};
+  if (typeof rawBody === 'string') {
+    try {
+      const parsed = JSON.parse(rawBody);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof rawBody === 'object' ? rawBody : {};
 }
 
 export async function handleGuildHighscoresRequest(req: ApiRequest, res: ApiResponse) {
   if (req.method && req.method !== 'GET' && req.method !== 'POST') {
-    return res.status(405).json({ error: 'Método não permitido.' });
+    return sendJson(res, 405, { error: 'Método não permitido.' });
   }
   const user = await authenticateRequest(req, res);
   if (!user) return;
@@ -438,8 +472,9 @@ export async function handleGuildHighscoresRequest(req: ApiRequest, res: ApiResp
   try {
     const uid = user.uid;
     const now = Date.now();
+    const parsedBody = parseRequestBody(req.body);
     const forceQuery = getQueryString(req.query, 'force');
-    const requestedForce = forceQuery === '1' || req.body?.force === true;
+    const requestedForce = forceQuery === '1' || parsedBody.force === true;
     const lastUserForce = forceRefreshByUser.get(uid) || 0;
     const canForce = requestedForce && now - lastUserForce >= FORCE_REFRESH_COOLDOWN_MS;
     if (canForce) {
@@ -448,9 +483,9 @@ export async function handleGuildHighscoresRequest(req: ApiRequest, res: ApiResp
     }
 
     const bodyPlayers: Array<{ name: string; level?: number; vocation?: string }> = Array.isArray(
-      req.body?.players
+      parsedBody.players
     )
-      ? req.body.players
+      ? parsedBody.players
       : [];
 
     const sanitizedBodyPlayers = bodyPlayers
@@ -475,7 +510,7 @@ export async function handleGuildHighscoresRequest(req: ApiRequest, res: ApiResp
 
     const cachedEntry = guildHighscoresCache.get(cacheKey);
     if (!canForce && cachedEntry && now - cachedEntry.timestamp < CACHE_TTL_MS) {
-      return res.json(cachedEntry.data);
+      return sendJson(res, 200, cachedEntry.data);
     }
 
     if (TOKEN && Date.now() > apiRateLimitedUntil) {
@@ -495,7 +530,7 @@ export async function handleGuildHighscoresRequest(req: ApiRequest, res: ApiResp
           if (Array.isArray(list) && list.length > 0 && !data?.error) {
             pruneMapIfLarge(guildHighscoresCache, v => Date.now() - v.timestamp >= CACHE_TTL_MS, 15);
             guildHighscoresCache.set('__default__', { data, timestamp: Date.now() });
-            return res.json(data);
+            return sendJson(res, 200, data);
           }
         }
       } catch {
@@ -567,16 +602,16 @@ export async function handleGuildHighscoresRequest(req: ApiRequest, res: ApiResp
       guildHighscoresCache.set(cacheKey, { data: payload, timestamp: Date.now() });
     }
 
-    return res.json(payload);
+    return sendJson(res, 200, payload);
   } catch (err) {
     console.error('Error in /guild-highscores:', err);
-    return res.status(500).json({ error: 'Erro interno do servidor.' });
+    return sendJson(res, 500, { error: 'Erro interno do servidor.' });
   }
 }
 
 export async function handleCharacterHighscoresRequest(req: ApiRequest, res: ApiResponse) {
   if (req.method && req.method !== 'GET') {
-    return res.status(405).json({ error: 'Método não permitido.' });
+    return sendJson(res, 405, { error: 'Método não permitido.' });
   }
   const user = await authenticateRequest(req, res);
   if (!user) return;
@@ -587,7 +622,7 @@ export async function handleCharacterHighscoresRequest(req: ApiRequest, res: Api
     const rawDay = getQueryString(req.query, 'day').trim();
 
     if (!cleanName || cleanName.length > 60 || !VALID_CHAR_NAME_REGEX.test(cleanName)) {
-      return res.status(400).json({ error: 'Parâmetro name inválido.' });
+      return sendJson(res, 400, { error: 'Parâmetro name inválido.' });
     }
     const cleanDay = /^[a-zA-Z0-9_-]{1,20}$/.test(rawDay) ? rawDay : undefined;
 
@@ -615,7 +650,7 @@ export async function handleCharacterHighscoresRequest(req: ApiRequest, res: Api
     if (!resultData || resultData.error || (!resultData.yesterdayExp && !resultData.expYesterday)) {
       const scraped = await scrapePlayerYesterdayExp(cleanName);
       if (scraped && scraped.yesterdayExp > 0) {
-        return res.json({
+        return sendJson(res, 200, {
           ...(resultData && !resultData.error ? resultData : {}),
           ...scraped,
         });
@@ -623,10 +658,10 @@ export async function handleCharacterHighscoresRequest(req: ApiRequest, res: Api
     }
 
     if (resultData && !resultData.error) {
-      return res.json(resultData);
+      return sendJson(res, 200, resultData);
     }
 
-    return res.json({
+    return sendJson(res, 200, {
       name: cleanName,
       yesterdayExp: 0,
       expYesterday: 0,
@@ -634,6 +669,6 @@ export async function handleCharacterHighscoresRequest(req: ApiRequest, res: Api
     });
   } catch (err) {
     console.error('Error in /highscores:', err);
-    return res.status(500).json({ error: 'Erro interno do servidor.' });
+    return sendJson(res, 500, { error: 'Erro interno do servidor.' });
   }
 }

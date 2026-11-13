@@ -5,7 +5,7 @@ import {
   handleCharacterHighscoresRequest,
   handleGuildHighscoresRequest,
   handleMembersRequest,
-} from './api/missclick/_core';
+} from './api/missclick/_core.js';
 
 async function startServer() {
   const app = express();
