@@ -199,22 +199,23 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 overflow-y-auto">
-      <div className="relative w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 transition-all scrollbar-thin animate-in slide-in-from-bottom duration-250">
+      <div className="relative w-full max-w-lg max-h-[92dvh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white p-4 sm:p-6 pb-safe shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 transition-all scrollbar-thin animate-in slide-in-from-bottom duration-200">
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700 sm:hidden" />
         {/* Top bar */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+        <div className="flex items-center justify-between pb-3.5 sm:pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 shrink-0">
               <MapPin className="h-4 w-4" />
             </span>
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+            <div className="min-w-0">
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
                 {!existingReservation
                   ? isAdmin
                     ? 'Marcação de Respawn (Admin)'
                     : 'Reservar Horário de Hunt'
-                  : 'Compartilhar Horário de Hunt / Party'}
+                  : 'Compartilhar Horário / Party'}
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
                 {dayNames[day]} • {timeSlot}
               </p>
             </div>
@@ -222,7 +223,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center p-2 sm:p-1.5 rounded-xl sm:rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
           >
             <X className="h-5 w-5" />
           </button>
@@ -259,7 +260,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-5 py-2 rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
               >
                 Entendi, Fechar
               </button>
@@ -286,7 +287,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 <select
                   value={selectedUserUid}
                   onChange={e => setSelectedUserUid(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm sm:text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {usersList
                     .slice()
@@ -337,12 +338,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     value={partySearchQuery}
                     onChange={e => setPartySearchQuery(e.target.value)}
                     placeholder="Pesquisar jogador por nome ou vocação..."
-                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 pl-8 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full min-h-[42px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 pl-9 text-sm sm:text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-3.5 sm:w-3.5 text-slate-400" />
                 </div>
 
-                <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40">
+                <div className="max-h-44 overflow-y-auto space-y-1.5 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40">
                   {(() => {
                     const filtered = otherUsersForHunt.filter(u => {
                       if (!partySearchQuery.trim()) return true;
@@ -372,7 +373,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                           <div
                             key={u.uid}
                             onClick={() => togglePartyMember(u.uid)}
-                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
+                            className={`flex items-center justify-between min-h-[44px] p-2.5 sm:p-2 rounded-lg cursor-pointer transition-colors ${
                               isSelected
                                 ? 'bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800'
                                 : 'hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent'
@@ -390,7 +391,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => {}}
-                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              className="h-5 w-5 sm:h-4 sm:w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
                             />
                           </div>
                         );
@@ -415,9 +416,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                   onChange={e => setNotes(e.target.value)}
                   placeholder="Ex: Teste de hunt duo, questline, ou foco em loot..."
                   maxLength={180}
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 pl-3.5 pr-9 py-2.5 text-sm sm:text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <FileText className="absolute right-3 top-3 h-4 w-4 text-slate-400" />
+                <FileText className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               </div>
             </div>
 
@@ -427,32 +428,32 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
               </div>
             )}
 
-            <div className="pt-3 flex items-center justify-between gap-2">
+            <div className="pt-3 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2.5">
               {existingReservation && (canModify || isAdmin) ? (
                 <button
                   type="button"
                   onClick={handleDelete}
                   disabled={submitting || isDeleting}
-                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-400 dark:hover:bg-rose-950/30 text-xs font-bold transition-all cursor-pointer"
+                  className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3.5 min-h-[44px] py-2.5 rounded-xl border border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-400 dark:hover:bg-rose-950/30 text-xs font-bold transition-all cursor-pointer"
                   title="Excluir marcação de respawn"
                 >
                   {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                   <span>Excluir Marcação</span>
                 </button>
-              ) : <div />}
+              ) : <div className="hidden sm:block" />}
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                  className="w-full sm:w-auto px-4 min-h-[44px] py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={submitting || isDeleting}
-                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                  className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 min-h-[44px] py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
                 >
                   {submitting ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -510,7 +511,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold transition-all cursor-pointer shadow-md"
+                className="w-full sm:w-auto min-h-[44px] px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold transition-all cursor-pointer shadow-md"
               >
                 Fechar
               </button>

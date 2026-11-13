@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { DAYS_CONFIG, RANK_METADATA } from '../constants/guildData';
 import { useAuth } from '../context/AuthContext';
-import { setReservation, deleteReleasedRespawn } from '../services/firestoreService';
+import { claimReleasedRespawn } from '../services/firestoreService';
 
 interface ReleasedRespawnsTabProps {
   releasedList: ReleasedRespawn[];
@@ -75,7 +75,9 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
     setIsSubmittingClaim(true);
 
     try {
-      const reservationId = `${claimingItem.day}_${claimingItem.respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${claimingItem.timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
+      const reservationId =
+        claimingItem.claimReservationId ||
+        `${claimingItem.day}_${claimingItem.respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${claimingItem.timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
 
       const newReservation: Reservation = {
         id: reservationId,
@@ -89,13 +91,11 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
         partyMembers: '',
         notes: `Aceito via Respaws Liberados (Anteriormente de ${claimingItem.charName})`,
         reservedAt: new Date().toISOString(),
+        releasedRespawnId: claimingItem.id,
       };
 
-      // 1. Create the new reservation occupying the schedule slot
-      await setReservation(newReservation);
-
-      // 2. Remove the item from released_respawns collection so others can't claim it again
-      await deleteReleasedRespawn(claimingItem.id);
+      // Atomically claim the slot (creates reservation + details and removes released_respawn)
+      await claimReleasedRespawn(claimingItem, newReservation);
 
       setClaimToast(`Respawn "${claimingItem.respawnName}" (${claimingItem.timeSlot}) reservado com sucesso! Agora é seu na aba Respaws.`);
       setTimeout(() => setClaimToast(null), 4500);
@@ -191,13 +191,13 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 shadow-sm border border-slate-200 dark:border-slate-800 space-y-4">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 shadow-sm border border-slate-200 dark:border-slate-800 space-y-3 sm:space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Day selection pills */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 sm:gap-2">
             <button
               onClick={() => setSelectedDayFilter('all')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`min-h-[40px] sm:min-h-[34px] px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                 selectedDayFilter === 'all'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                   : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
@@ -212,15 +212,16 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
                 <button
                   key={day.key}
                   onClick={() => setSelectedDayFilter(day.key as HuntDay)}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  className={`min-h-[40px] sm:min-h-[34px] flex items-center justify-center sm:justify-start gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                     isSelected
                       ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                       : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
                   }`}
                 >
-                  <Calendar className="h-3.5 w-3.5" />
-                  <span>{day.label}</span>
-                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                  <Calendar className="h-3.5 w-3.5 shrink-0" />
+                  <span className="sm:hidden">{day.shortLabel}</span>
+                  <span className="hidden sm:inline">{day.label}</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] tabular-nums ${
                     isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
                   }`}>
                     {count}
@@ -231,14 +232,14 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
           </div>
 
           {/* Search box */}
-          <div className="relative min-w-[260px] sm:min-w-[320px]">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <div className="relative w-full lg:w-80">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Buscar respawn, char ou horário..."
-              className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full min-h-[42px] sm:min-h-[38px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 py-2 pl-9 pr-3 text-sm sm:text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
@@ -348,7 +349,7 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setClaimingItem(item)}
-                      className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+                      className="flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
                     >
                       <Zap className="h-4 w-4" />
                       <span>Aceitar Respawn</span>
@@ -357,7 +358,7 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
                     <button
                       onClick={() => onNavigateToSchedule(item.day, item.respawnName)}
                       title="Ver localização no Grid"
-                      className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+                      className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
                     >
                       <ArrowRight className="h-4 w-4" />
                     </button>
@@ -371,8 +372,9 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
 
       {/* Modal de Confirmacao de Aceite do Respawn */}
       {claimingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-5 pb-safe">
+            <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto -mt-1 mb-1 sm:hidden" />
             <div className="flex items-center gap-3">
               <div className="h-11 w-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold shrink-0">
                 <UserCheck className="h-6 w-6" />
@@ -388,23 +390,23 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Respawn:</span>
-                <strong className="text-slate-900 dark:text-white font-black">{claimingItem.respawnName}</strong>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 shrink-0">Respawn:</span>
+                <strong className="text-slate-900 dark:text-white font-black text-right truncate">{claimingItem.respawnName}</strong>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Horário:</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 shrink-0">Horário:</span>
                 <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{claimingItem.timeSlot}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Dia:</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 shrink-0">Dia:</span>
                 <span className="font-bold text-slate-700 dark:text-slate-300">
                   {claimingItem.day === 'friday' ? 'Sexta-feira' : claimingItem.day === 'saturday' ? 'Sábado' : 'Domingo'}
                 </span>
               </div>
-              <div className="flex items-center justify-between border-t border-slate-200 dark:border-slate-700/60 pt-2">
-                <span className="text-slate-400">Seu Personagem:</span>
-                <strong className="text-blue-600 dark:text-blue-400 font-black">{userProfile?.charName}</strong>
+              <div className="flex items-center justify-between gap-2 border-t border-slate-200 dark:border-slate-700/60 pt-2">
+                <span className="text-slate-400 shrink-0">Seu Personagem:</span>
+                <strong className="text-blue-600 dark:text-blue-400 font-black truncate">{userProfile?.charName}</strong>
               </div>
             </div>
 
@@ -412,12 +414,12 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
               Ao dar o aceite, esta reserva passará imediatamente para o seu personagem <strong className="text-slate-900 dark:text-white">{userProfile?.charName}</strong> e o horário ficará <strong className="text-emerald-600 dark:text-emerald-400">ocupado</strong> na Agenda geral.
             </p>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 disabled={isSubmittingClaim}
                 onClick={() => setClaimingItem(null)}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
               >
                 Cancelar
               </button>
@@ -425,7 +427,7 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
                 type="button"
                 disabled={isSubmittingClaim}
                 onClick={handleConfirmClaim}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-500/20 disabled:opacity-50 transition-all cursor-pointer"
               >
                 {isSubmittingClaim ? (
                   <>

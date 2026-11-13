@@ -9,6 +9,10 @@
     --bg-light: #F7F9FC;
     --bg-dark: #0B0F19;
   }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 html, body {
@@ -21,11 +25,29 @@ body {
   background-color: var(--bg-light);
   color: #0F172A;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .dark body {
   background-color: var(--bg-dark);
   color: #F8FAFC;
+}
+
+/* Mobile utility helpers */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Custom scrollbars */

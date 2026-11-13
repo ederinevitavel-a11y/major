@@ -102,6 +102,14 @@ export const PLANILHADOS_SLOTS_MAP: Record<string, string[]> = {
   'Sparkling Pools': ['06:20h – 09:00h'],
 };
 
+export const PLANILHADOS_SLOTS_BY_DAY: Partial<Record<string, Partial<Record<HuntDay, string[]>>>> = {
+  'Gloom Pillars': {
+    friday: ['06:15h – 08:30h', '08:30h – 12:00h', '19:15h – 22:30h', '22:30h – 01:00h'],
+    saturday: ['21:00h – 23:00h'],
+    sunday: ['21:00h – 23:00h'],
+  },
+};
+
 export const PLANILHADOS_COLOR_MAP: Record<string, { label: string; dotEmoji: string; badgeClass: string; borderClass: string; bgClass: string }> = {
   'Darklight Core': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
   'Forgotten Crypt': { label: '', dotEmoji: '', badgeClass: '', borderClass: 'border-slate-200 dark:border-slate-800', bgClass: '' },
@@ -156,8 +164,11 @@ export const formatMinutesToSlot = (startMin: number, endMin: number): string =>
   return `${formatHourMin(startMin)} – ${formatHourMin(endMin)}`;
 };
 
-export const getPlanilhadoAllTimeSlots = (respawnName: string): string[] => {
-  const customSlots = PLANILHADOS_SLOTS_MAP[respawnName] || [];
+export const getPlanilhadoAllTimeSlots = (respawnName: string, day?: HuntDay): string[] => {
+  const customSlots =
+    (day && PLANILHADOS_SLOTS_BY_DAY[respawnName]?.[day]) ||
+    PLANILHADOS_SLOTS_MAP[respawnName] ||
+    [];
   if (customSlots.length === 0) return NORMAL_TIME_SLOTS;
 
   const customRanges = customSlots.map(s => parseSlotRange(s)).sort((a, b) => a.start - b.start);

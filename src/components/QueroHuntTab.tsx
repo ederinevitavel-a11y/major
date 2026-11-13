@@ -92,6 +92,8 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
     if (v.includes('druid')) return 'ED';
     if (v.includes('sorcerer')) return 'MS';
     if (v.includes('paladin')) return 'RP';
+    if (v.includes('exalted monk')) return 'EM';
+    if (v.includes('monk')) return 'MK';
     return voc || 'N/D';
   };
 
@@ -145,6 +147,19 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
         accentGradient: 'from-amber-500 to-orange-600',
       };
     }
+    if (v.includes('monk')) {
+      const isExalted = v.includes('exalted');
+      return {
+        label: isExalted ? 'Exalted Monk' : 'Monk',
+        short: isExalted ? 'EM' : 'MK',
+        icon: Flame,
+        colorClass: 'text-cyan-600 dark:text-cyan-400',
+        badgeBg: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/80 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800',
+        borderClass: 'border-cyan-300/80 dark:border-cyan-900/60',
+        cardBg: 'hover:border-cyan-400 dark:hover:border-cyan-700',
+        accentGradient: 'from-cyan-500 to-teal-600',
+      };
+    }
     return {
       label: 'Player',
       short: 'Tibia',
@@ -188,6 +203,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
   const countED = posts.filter(p => (p.vocation || '').toLowerCase().includes('druid')).length;
   const countMS = posts.filter(p => (p.vocation || '').toLowerCase().includes('sorcerer')).length;
   const countRP = posts.filter(p => (p.vocation || '').toLowerCase().includes('paladin')).length;
+  const countMonk = posts.filter(p => (p.vocation || '').toLowerCase().includes('monk')).length;
 
   return (
     <div className="w-full space-y-5 animate-in fade-in duration-300">
@@ -220,7 +236,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
         </div>
 
         {/* Filter and Search Bar */}
-        <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800/80 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+        <div className="mt-5 pt-4 sm:mt-6 sm:pt-5 border-t border-slate-100 dark:border-slate-800/80 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 sm:gap-4">
           {/* Search box */}
           <div className="relative flex-1 max-w-full lg:max-w-xs">
             <input
@@ -228,16 +244,16 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               placeholder="Buscar por nome, vocação, level..."
-              className="w-full pl-9 pr-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full min-h-[42px] sm:min-h-[38px] pl-9 pr-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm sm:text-xs font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500"
             />
-            <Search className="h-4 w-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+            <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
           {/* Vocation Pills Filter */}
-          <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 sm:pb-0 sm:flex-wrap">
             <button
               onClick={() => setSelectedVocation('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`min-h-[40px] sm:min-h-[32px] px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 selectedVocation === 'all'
                   ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
@@ -248,7 +264,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
 
             <button
               onClick={() => setSelectedVocation('knight')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`min-h-[40px] sm:min-h-[32px] flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 selectedVocation === 'knight'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/60 dark:text-blue-300'
@@ -260,7 +276,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
 
             <button
               onClick={() => setSelectedVocation('druid')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`min-h-[40px] sm:min-h-[32px] flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 selectedVocation === 'druid'
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300'
@@ -272,7 +288,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
 
             <button
               onClick={() => setSelectedVocation('sorcerer')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`min-h-[40px] sm:min-h-[32px] flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 selectedVocation === 'sorcerer'
                   ? 'bg-purple-600 text-white shadow-xs'
                   : 'bg-purple-50 text-purple-700 hover:bg-purple-100 dark:bg-purple-950/60 dark:text-purple-300'
@@ -284,7 +300,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
 
             <button
               onClick={() => setSelectedVocation('paladin')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`min-h-[40px] sm:min-h-[32px] flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 selectedVocation === 'paladin'
                   ? 'bg-amber-600 text-white shadow-xs'
                   : 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/60 dark:text-amber-300'
@@ -293,23 +309,35 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
               <Crosshair className="h-3.5 w-3.5" />
               <span>RP ({countRP})</span>
             </button>
+
+            <button
+              onClick={() => setSelectedVocation('monk')}
+              className={`min-h-[40px] sm:min-h-[32px] flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                selectedVocation === 'monk'
+                  ? 'bg-cyan-600 text-white shadow-xs'
+                  : 'bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-950/60 dark:text-cyan-300'
+              }`}
+            >
+              <Flame className="h-3.5 w-3.5" />
+              <span>Monk ({countMonk})</span>
+            </button>
           </div>
 
           {/* Day Filter */}
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700">
+          <div className="grid grid-cols-4 sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700">
             <button
               onClick={() => setSelectedDay('all')}
-              className={`px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 selectedDay === 'all'
                   ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
                   : 'text-slate-500 dark:text-slate-400'
               }`}
             >
-              Qualquer Dia
+              Todos
             </button>
             <button
               onClick={() => setSelectedDay('friday')}
-              className={`px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 selectedDay === 'friday'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
                   : 'text-slate-500 dark:text-slate-400'
@@ -319,7 +347,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
             </button>
             <button
               onClick={() => setSelectedDay('saturday')}
-              className={`px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 selectedDay === 'saturday'
                   ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
                   : 'text-slate-500 dark:text-slate-400'
@@ -329,7 +357,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
             </button>
             <button
               onClick={() => setSelectedDay('sunday')}
-              className={`px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 selectedDay === 'sunday'
                   ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
                   : 'text-slate-500 dark:text-slate-400'
@@ -486,7 +514,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
                     href={getWhatsAppLink(post)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-black shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+                    className="flex-1 min-h-[44px] flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-black shadow-md shadow-emerald-500/20 transition-all cursor-pointer whitespace-nowrap"
                   >
                     <MessageCircle className="h-4 w-4 shrink-0 fill-current" />
                     <span>Chamar no WhatsApp</span>
@@ -497,7 +525,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
                     type="button"
                     onClick={() => copyPhoneNumber(post.phone, post.id)}
                     title={`Copiar telefone (${post.phone})`}
-                    className="p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                    className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer shrink-0"
                   >
                     {copiedId === post.id ? (
                       <Check className="h-4 w-4 text-emerald-600" />
@@ -508,7 +536,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
 
                   {/* Owner / Admin Controls */}
                   {canManage && (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
                         onClick={() => {
@@ -516,7 +544,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
                           setIsModalOpen(true);
                         }}
                         title="Editar anúncio"
-                        className="p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                        className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
                       >
                         <Pencil className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                       </button>
@@ -524,7 +552,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
                         type="button"
                         onClick={() => handleDeletePost(post.id)}
                         title="Remover anúncio"
-                        className="p-2.5 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
+                        className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2.5 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>

@@ -98,6 +98,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const handleExportExcel = () => {
     setDownloadingExcel(true);
     try {
+      const escapeHtml = (val: unknown): string => {
+        const raw = String(val ?? '');
+        const safe = /^([=+@\t\r]|-[a-zA-Z0-9(=+])/.test(raw) ? `'${raw}` : raw;
+        return safe
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      };
+
       // Build HTML Table representation that Excel reads natively (.xls)
       const nowStr = new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       
@@ -132,8 +143,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </head>
         <body>
           <h2>ESCALA COMPLETA DE RESPAWNS - GUILD MAJOR (INFERNO DE DOUBLE)</h2>
-          <p><b>Data do Backup:</b> ${nowStr}</p>
-          <p><b>Gerado por:</b> Administrador (${currentUser?.email || 'Admin'})</p>
+          <p><b>Data do Backup:</b> ${escapeHtml(nowStr)}</p>
+          <p><b>Gerado por:</b> Administrador (${escapeHtml(currentUser?.email || 'Admin')})</p>
           <br/>
           <table>
             <thead>
@@ -163,7 +174,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         if (dayReservations.length === 0) {
           html += `
             <tr>
-              <td><b>${dayLabel}</b></td>
+              <td><b>${escapeHtml(dayLabel)}</b></td>
               <td colspan="8" style="color: #94A3B8; italic;">Nenhum respawn reservado neste dia.</td>
             </tr>
           `;
@@ -175,15 +186,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
             html += `
               <tr ${bgStyle}>
-                <td><b>${dayLabel}</b></td>
-                <td>${slotTypeLabel}</td>
-                <td><b>${r.respawnName}</b></td>
-                <td><b>${r.timeSlot}</b></td>
-                <td style="color: #047857; font-weight: bold;">${r.charName || '[Anônimo]'}</td>
-                <td>${r.userRank || 'Member'}</td>
-                <td>${r.partyMembers || '-'}</td>
-                <td>${r.notes || '-'}</td>
-                <td>${reservedDateStr}</td>
+                <td><b>${escapeHtml(dayLabel)}</b></td>
+                <td>${escapeHtml(slotTypeLabel)}</td>
+                <td><b>${escapeHtml(r.respawnName)}</b></td>
+                <td><b>${escapeHtml(r.timeSlot)}</b></td>
+                <td style="color: #047857; font-weight: bold;">${escapeHtml(r.charName || '[Anônimo]')}</td>
+                <td>${escapeHtml(r.userRank || 'Member')}</td>
+                <td>${escapeHtml(r.partyMembers || '-')}</td>
+                <td>${escapeHtml(r.notes || '-')}</td>
+                <td>${escapeHtml(reservedDateStr)}</td>
               </tr>
             `;
           });
@@ -217,25 +228,26 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+      <div className="relative w-full max-w-2xl rounded-t-3xl sm:rounded-2xl bg-white p-4 sm:p-6 pb-safe shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92dvh] animate-in slide-in-from-bottom duration-200">
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700 sm:hidden" />
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 shrink-0">
               <Share2 className="h-4 w-4" />
             </span>
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Exportar & Salvar Agenda de Respawns
+            <div className="min-w-0">
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
+                Exportar Agenda de Respawns
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Baixe a planilha em Excel (Backup) ou copie a mensagem formatada para WhatsApp / Discord.
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                Baixe o backup Excel ou copie para WhatsApp / Discord.
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
+            className="flex min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer shrink-0"
           >
             <X className="h-5 w-5" />
           </button>
@@ -243,12 +255,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Day selection and privacy status */}
         <div className="my-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
             <span className="text-xs font-semibold text-slate-500">Filtrar dia:</span>
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+            <div className="grid grid-cols-2 sm:flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
               <button
                 onClick={() => setSelectedDay('friday')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                   selectedDay === 'friday' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
@@ -256,7 +268,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </button>
               <button
                 onClick={() => setSelectedDay('saturday')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                   selectedDay === 'saturday' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
@@ -264,7 +276,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </button>
               <button
                 onClick={() => setSelectedDay('sunday')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                   selectedDay === 'sunday' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
@@ -272,7 +284,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </button>
               <button
                 onClick={() => setSelectedDay('all')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                   selectedDay === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
@@ -297,19 +309,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
 
         {/* Text Preview area */}
-        <div className="flex-1 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 p-4 font-mono text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap select-all">
+        <div className="flex-1 min-h-[180px] overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 p-3.5 sm:p-4 font-mono text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap select-all">
           {generateExportText()}
         </div>
 
         {/* Action bar */}
-        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <span className="text-[11px] text-slate-400">
+        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+          <span className="text-[11px] text-slate-400 hidden sm:inline">
             Formatação em Markdown compatível com WhatsApp & Discord
           </span>
-          <div className="flex flex-wrap items-center gap-2 justify-end">
+          <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:justify-end w-full sm:w-auto">
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 sm:py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
             >
               Fechar
             </button>
@@ -318,7 +330,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <button
                 onClick={handleExportExcel}
                 disabled={downloadingExcel}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-500/20 disabled:opacity-50 transition-all cursor-pointer"
                 title="Salvar toda a escala e dados em formato de planilha Excel (.xls)"
               >
                 <FileSpreadsheet className="h-4 w-4" />
@@ -328,7 +340,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all cursor-pointer"
+              className="w-full sm:w-auto min-h-[44px] flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all cursor-pointer"
             >
               {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               {copied ? 'Copiado!' : 'Copiar Texto'}

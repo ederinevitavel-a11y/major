@@ -47,12 +47,13 @@ export const ResetScheduleModal: React.FC<ResetScheduleModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white p-5 sm:p-6 pb-safe shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-in slide-in-from-bottom duration-200">
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700 sm:hidden" />
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 shrink-0">
               <RotateCcw className="h-5 w-5" />
             </span>
             <div>
@@ -67,7 +68,7 @@ export const ResetScheduleModal: React.FC<ResetScheduleModalProps> = ({
           <button
             onClick={onClose}
             disabled={isDeleting}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+            className="flex min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
@@ -159,12 +160,12 @@ export const ResetScheduleModal: React.FC<ResetScheduleModalProps> = ({
         )}
 
         {/* Action Buttons */}
-        <div className="pt-2 flex items-center justify-end gap-2.5">
+        <div className="pt-2 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-2.5">
           <button
             type="button"
             onClick={onClose}
             disabled={isDeleting}
-            className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
           >
             Cancelar
           </button>
@@ -172,7 +173,7 @@ export const ResetScheduleModal: React.FC<ResetScheduleModalProps> = ({
             type="button"
             onClick={handleConfirmReset}
             disabled={isDeleting || targetCount === 0}
-            className={`flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-white text-xs font-bold transition-all shadow-md cursor-pointer ${
+            className={`w-full sm:w-auto min-h-[44px] flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl text-white text-xs font-bold transition-all shadow-md cursor-pointer ${
               resetScope === 'all'
                 ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20'
                 : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'

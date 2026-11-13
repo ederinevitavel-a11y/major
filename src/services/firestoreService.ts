@@ -14,8 +14,8 @@ import {
   deleteField,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
-import { AllowedEmail, Reservation, ReservationSlot, ReservationDetails, UserProfile, HuntDay, DoubleXpSettings, DoubleXpRecord, CustomRespawn, ReleasedRespawn, LfgPost } from '../types';
-import { SUPER_ADMIN_EMAIL, parseSlotRange } from '../constants/guildData';
+import { AllowedEmail, Reservation, ReservationSlot, ReservationDetails, UserProfile, MemberDirectoryProfile, HuntDay, DoubleXpSettings, DoubleXpRecord, CustomRespawn, ReleasedRespawn, LfgPost, SpecialRespawnsBackup } from '../types';
+import { SUPER_ADMIN_EMAIL, parseSlotRange, PLANILHADOS_RESPAWNS, THREE_HOUR_RESPAWNS } from '../constants/guildData';
 import { DEFAULT_FIXED_SCHEDULE } from '../constants/defaultSchedule';
 
 // ---- ALLOWED EMAILS ----
@@ -87,14 +87,57 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   }
 }
 
+function toMemberDirectoryPayload(profile: Partial<UserProfile> & { uid: string }): Record<string, unknown> {
+  return cleanData({
+    uid: profile.uid,
+    charName: profile.charName,
+    guildName: profile.guildName,
+    rank: profile.rank,
+    vocation: profile.vocation,
+    level: profile.level,
+    sharedWith: profile.sharedWith,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function directoryDocToUserProfile(d: MemberDirectoryProfile): UserProfile {
+  return {
+    uid: d.uid,
+    email: '',
+    charName: d.charName || '',
+    guildName: d.guildName || 'Missclick',
+    rank: d.rank || 'Member',
+    vocation: d.vocation || '',
+    level: typeof d.level === 'number' ? d.level : 0,
+    isAdmin: false,
+    sharedWith: d.sharedWith || [],
+    createdAt: '',
+    updatedAt: d.updatedAt,
+  };
+}
+
 export async function saveUserProfile(profile: UserProfile): Promise<void> {
   const path = `users/${profile.uid}`;
   try {
+    const nowIso = new Date().toISOString();
     const payload = cleanData({
       ...profile,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     } as unknown as Record<string, unknown>);
-    await setDoc(doc(db, 'users', profile.uid), payload);
+    const dirPayload = cleanData({
+      uid: profile.uid,
+      charName: profile.charName,
+      guildName: profile.guildName,
+      rank: profile.rank,
+      vocation: profile.vocation,
+      level: profile.level,
+      sharedWith: profile.sharedWith ?? [],
+      updatedAt: nowIso,
+    });
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'users', profile.uid), payload);
+    batch.set(doc(db, 'member_directory', profile.uid), dirPayload);
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -103,12 +146,124 @@ export async function saveUserProfile(profile: UserProfile): Promise<void> {
 export async function updateUserProfile(uid: string, updates: Partial<UserProfile>): Promise<void> {
   const path = `users/${uid}`;
   try {
+    const nowIso = new Date().toISOString();
     await updateDoc(doc(db, 'users', uid), {
       ...updates,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     });
+
+    const dirUpdates: Record<string, unknown> = {};
+    if (updates.charName !== undefined) dirUpdates.charName = updates.charName;
+    if (updates.guildName !== undefined) dirUpdates.guildName = updates.guildName;
+    if (updates.rank !== undefined) dirUpdates.rank = updates.rank;
+    if (updates.vocation !== undefined) dirUpdates.vocation = updates.vocation;
+    if (updates.level !== undefined) dirUpdates.level = updates.level;
+    if (updates.sharedWith !== undefined) dirUpdates.sharedWith = updates.sharedWith;
+
+    if (Object.keys(dirUpdates).length > 0) {
+      dirUpdates.updatedAt = nowIso;
+      try {
+        await updateDoc(doc(db, 'member_directory', uid), dirUpdates);
+      } catch {
+        // Fallback if directory entry doesn't exist yet
+        const snap = await getDoc(doc(db, 'users', uid));
+        if (snap.exists()) {
+          const full = snap.data() as UserProfile;
+          await setDoc(doc(db, 'member_directory', uid), toMemberDirectoryPayload({ ...full, ...updates }));
+        }
+      }
+    }
+
+    if (updates.sharedWith !== undefined) {
+      try {
+        const ownDetailsSnap = await getDocs(
+          query(collection(db, 'reservation_details'), where('userUid', '==', uid))
+        );
+        if (!ownDetailsSnap.empty) {
+          const syncBatch = writeBatch(db);
+          ownDetailsSnap.docs.forEach(d => {
+            syncBatch.update(d.ref, {
+              sharedViewerUids: updates.sharedWith || [],
+              updatedAt: nowIso,
+            });
+          });
+          await syncBatch.commit();
+        }
+      } catch (syncErr) {
+        console.warn('Reservation details sharedViewerUids sync notice:', syncErr);
+      }
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function ensureMemberDirectoryEntry(profile: UserProfile): Promise<void> {
+  if (!profile?.uid) return;
+  try {
+    const dirRef = doc(db, 'member_directory', profile.uid);
+    const snap = await getDoc(dirRef);
+    if (!snap.exists()) {
+      await setDoc(dirRef, cleanData({
+        uid: profile.uid,
+        charName: profile.charName,
+        guildName: profile.guildName,
+        rank: profile.rank,
+        vocation: profile.vocation,
+        level: profile.level,
+        sharedWith: profile.sharedWith ?? [],
+        updatedAt: new Date().toISOString(),
+      }));
+    }
+  } catch (err) {
+    console.debug('Member directory sync notice:', err);
+  }
+}
+
+export async function syncMemberDirectoryFromUsers(users: UserProfile[]): Promise<void> {
+  if (!users || users.length === 0) return;
+  try {
+    const dirSnap = await getDocs(collection(db, 'member_directory'));
+    const existingMap = new Map<string, MemberDirectoryProfile>();
+    dirSnap.docs.forEach(d => existingMap.set(d.id, d.data() as MemberDirectoryProfile));
+
+    const toSync = users.filter(u => {
+      if (!u.uid || !u.charName) return false;
+      const cur = existingMap.get(u.uid);
+      if (!cur) return true;
+      return (
+        cur.charName !== u.charName ||
+        cur.rank !== u.rank ||
+        cur.guildName !== u.guildName ||
+        cur.level !== u.level ||
+        cur.vocation !== u.vocation ||
+        JSON.stringify(cur.sharedWith || []) !== JSON.stringify(u.sharedWith || [])
+      );
+    });
+
+    if (toSync.length === 0) return;
+    const chunkSize = 400;
+    for (let i = 0; i < toSync.length; i += chunkSize) {
+      const batch = writeBatch(db);
+      toSync.slice(i, i + chunkSize).forEach(u => {
+        batch.set(
+          doc(db, 'member_directory', u.uid),
+          cleanData({
+            uid: u.uid,
+            charName: u.charName,
+            guildName: u.guildName,
+            rank: u.rank,
+            vocation: u.vocation,
+            level: u.level,
+            sharedWith: u.sharedWith ?? [],
+            updatedAt: new Date().toISOString(),
+          })
+        );
+      });
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('Directory backfill notice:', err);
   }
 }
 
@@ -117,6 +272,17 @@ export async function getAllUserProfiles(): Promise<UserProfile[]> {
   try {
     const snap = await getDocs(collection(db, path));
     return snap.docs.map(d => d.data() as UserProfile);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+}
+
+export async function getAllMemberDirectory(): Promise<UserProfile[]> {
+  const path = 'member_directory';
+  try {
+    const snap = await getDocs(collection(db, path));
+    return snap.docs.map(d => directoryDocToUserProfile(d.data() as MemberDirectoryProfile));
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
     return [];
@@ -133,6 +299,25 @@ export function subscribeToUserProfiles(
     collection(db, path),
     snapshot => {
       const profiles = snapshot.docs.map(d => d.data() as UserProfile);
+      callback(profiles);
+    },
+    error => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+// Live real-time subscription to PII-free member directory (for regular whitelisted members)
+export function subscribeToMemberDirectory(
+  callback: (profiles: UserProfile[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const path = 'member_directory';
+  return onSnapshot(
+    collection(db, path),
+    snapshot => {
+      const profiles = snapshot.docs.map(d => directoryDocToUserProfile(d.data() as MemberDirectoryProfile));
       callback(profiles);
     },
     error => {
@@ -195,8 +380,23 @@ export function subscribeToReservations(
   onError?: (err: unknown) => void
 ): Unsubscribe {
   let slotsList: ReservationSlot[] = [];
+  const ownDetailsMap = new Map<string, ReservationDetails>();
+  const publicDetailsMap = new Map<string, ReservationDetails>();
+  const partyDetailsMap = new Map<string, ReservationDetails>();
+  const sharedDetailsMap = new Map<string, ReservationDetails>();
   const detailsMap = new Map<string, ReservationDetails>();
   let unsubDetails: Unsubscribe | null = null;
+  let unsubPublicDetails: Unsubscribe | null = null;
+  let unsubPartyDetails: Unsubscribe | null = null;
+  let unsubSharedDetails: Unsubscribe | null = null;
+
+  const rebuildDetailsMap = () => {
+    detailsMap.clear();
+    publicDetailsMap.forEach((v, k) => detailsMap.set(k, v));
+    sharedDetailsMap.forEach((v, k) => detailsMap.set(k, v));
+    partyDetailsMap.forEach((v, k) => detailsMap.set(k, v));
+    ownDetailsMap.forEach((v, k) => detailsMap.set(k, v));
+  };
 
   const emit = () => {
     const getCleanName = (name: string) => (name || '').replace(/^[A-Z0-9]+\s*—\s*/, '');
@@ -208,6 +408,17 @@ export function subscribeToReservations(
       if (cleanRespawn === 'forgotten crypt') {
         if (s.slotType === 'normal') return false;
         if ((s.timeSlot || '').includes('20:40')) return false;
+      }
+      if (cleanRespawn === 'gloom pillars' && (s.day === 'saturday' || s.day === 'sunday')) {
+        const detail = detailsMap.get(s.id);
+        const charName = (detail?.charName || (s as unknown as { charName?: string }).charName || '').trim().toLowerCase();
+        const isXbloodyxDoc =
+          s.id.toLowerCase().includes('xbloodyx') ||
+          s.userUid === 'fixed-xbloodyx' ||
+          charName === 'xbloodyx';
+        if (isXbloodyxDoc && (s.timeSlot || '').includes('19:15')) {
+          return false;
+        }
       }
       return true;
     });
@@ -293,10 +504,11 @@ export function subscribeToReservations(
     unsubDetails = onSnapshot(
       collection(db, 'reservation_details'),
       snapshot => {
-        detailsMap.clear();
+        ownDetailsMap.clear();
         snapshot.docs.forEach(d => {
-          detailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
+          ownDetailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
         });
+        rebuildDetailsMap();
         emit();
       },
       error => {
@@ -304,46 +516,102 @@ export function subscribeToReservations(
       }
     );
   } else if (currentUserUid) {
-    // Regular member queries own reservation details + reservation details shared with them
-    getAllUserProfiles().then(profiles => {
-      const sharedByUids = profiles
-        .filter(p => p.sharedWith && (p.sharedWith.includes(currentUserUid) || p.sharedWith.includes('all')))
-        .map(p => p.uid);
-      
-      const allowedUids = Array.from(new Set([currentUserUid, ...sharedByUids])).slice(0, 10);
+    // 2a. Own reservation details
+    unsubDetails = onSnapshot(
+      query(collection(db, 'reservation_details'), where('userUid', '==', currentUserUid)),
+      snapshot => {
+        ownDetailsMap.clear();
+        snapshot.docs.forEach(d => {
+          ownDetailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
+        });
+        rebuildDetailsMap();
+        emit();
+      },
+      error => {
+        console.warn('Own reservation_details subscription:', error);
+      }
+    );
 
-      const userQuery = query(
+    // 2b. Public-visibility reservation details
+    unsubPublicDetails = onSnapshot(
+      query(collection(db, 'reservation_details'), where('isPublicVisibility', '==', true)),
+      snapshot => {
+        publicDetailsMap.clear();
+        snapshot.docs.forEach(d => {
+          publicDetailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
+        });
+        rebuildDetailsMap();
+        emit();
+      },
+      error => {
+        console.warn('Public reservation_details subscription:', error);
+      }
+    );
+
+    // 2c. Party member reservation details
+    unsubPartyDetails = onSnapshot(
+      query(collection(db, 'reservation_details'), where('partyMemberUids', 'array-contains', currentUserUid)),
+      snapshot => {
+        partyDetailsMap.clear();
+        snapshot.docs.forEach(d => {
+          partyDetailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
+        });
+        rebuildDetailsMap();
+        emit();
+      },
+      error => {
+        console.warn('Party reservation_details subscription:', error);
+      }
+    );
+
+    // 2d. Reservations shared directly with this member or 'all' via sharedViewerUids
+    unsubSharedDetails = onSnapshot(
+      query(
         collection(db, 'reservation_details'),
-        where('userUid', 'in', allowedUids)
-      );
-      unsubDetails = onSnapshot(
-        userQuery,
-        snapshot => {
-          detailsMap.clear();
-          snapshot.docs.forEach(d => {
-            detailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
-          });
-          emit();
-        },
-        error => {
-          console.warn('User reservation_details subscription:', error);
-        }
-      );
-    }).catch(err => {
-      console.warn('Error fetching shared profiles for reservation details:', err);
-    });
+        where('sharedViewerUids', 'array-contains-any', [currentUserUid, 'all'])
+      ),
+      snapshot => {
+        sharedDetailsMap.clear();
+        snapshot.docs.forEach(d => {
+          sharedDetailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
+        });
+        rebuildDetailsMap();
+        emit();
+      },
+      error => {
+        console.warn('Shared reservation_details subscription:', error);
+      }
+    );
   }
 
   return () => {
     unsubSlots();
     if (unsubDetails) unsubDetails();
+    if (unsubPublicDetails) unsubPublicDetails();
+    if (unsubPartyDetails) unsubPartyDetails();
+    if (unsubSharedDetails) unsubSharedDetails();
   };
+}
+
+async function resolveOwnerSharedWith(userUid: string): Promise<string[]> {
+  if (!userUid || userUid.startsWith('fixed-')) return [];
+  try {
+    const snap = await getDoc(doc(db, 'member_directory', userUid));
+    if (snap.exists()) {
+      const data = snap.data() as Partial<MemberDirectoryProfile>;
+      if (Array.isArray(data.sharedWith)) return data.sharedWith;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
 }
 
 export async function setReservation(reservation: Reservation): Promise<void> {
   const pathSlot = `reservations/${reservation.id}`;
-  const pathDetail = `reservation_details/${reservation.id}`;
   try {
+    const sharedViewerUids =
+      reservation.sharedViewerUids ?? (await resolveOwnerSharedWith(reservation.userUid));
     const batch = writeBatch(db);
 
     // 1. Public anonymous slot (strictly no charName, no partyMembers, no notes)
@@ -358,6 +626,7 @@ export async function setReservation(reservation: Reservation): Promise<void> {
       isPublicVisibility: reservation.isPublicVisibility ?? false,
       partyMemberUids: reservation.partyMemberUids || [],
       reservedAt: reservation.reservedAt || new Date().toISOString(),
+      releasedRespawnId: reservation.releasedRespawnId,
     };
 
     // 2. Private details document
@@ -368,10 +637,12 @@ export async function setReservation(reservation: Reservation): Promise<void> {
       userRank: reservation.userRank || 'Member',
       partyMembers: reservation.partyMembers || '',
       partyMemberUids: reservation.partyMemberUids || [],
+      sharedViewerUids,
       isPublicVisibility: reservation.isPublicVisibility ?? false,
       notes: reservation.notes || '',
       createdAt: reservation.reservedAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      releasedRespawnId: reservation.releasedRespawnId,
     };
 
     batch.set(doc(db, 'reservations', reservation.id), cleanData(publicSlot));
@@ -517,6 +788,110 @@ export async function sanitizeLegacyReservations(): Promise<number> {
       await cleanupBatch.commit();
       if (removedCount > 0) {
         console.info(`Cleaned ${removedCount} legacy Forgotten Crypt reservation(s).`);
+      }
+    }
+
+    // One-time cleanup for Gloom Pillars Xbloodyx Sat/Sun change (19:15–22:30 -> 21:00–23:00)
+    const gloomMigrationRef = doc(db, 'settings', 'gloom_pillars_xbloodyx_v1');
+    const gloomMigrationSnap = await getDoc(gloomMigrationRef);
+    if (!gloomMigrationSnap.exists()) {
+      const detailsSnap = await getDocs(collection(db, 'reservation_details'));
+      const detailsCharMap = new Map<string, string>();
+      detailsSnap.docs.forEach(detailDoc => {
+        const dData = detailDoc.data() as Record<string, unknown>;
+        if (dData.charName) {
+          detailsCharMap.set(detailDoc.id, String(dData.charName));
+        }
+      });
+
+      const gloomBatch = writeBatch(db);
+      let gloomRemovedCount = 0;
+
+      for (const d of snap.docs) {
+        const data = d.data() as Record<string, unknown>;
+        const respawnName = String(data.respawnName || '').replace(/^[A-Z0-9]+\s*—\s*/, '').trim().toLowerCase();
+        const day = String(data.day || '');
+        const timeSlot = String(data.timeSlot || '');
+        const charName = (detailsCharMap.get(d.id) || String(data.charName || '')).trim().toLowerCase();
+
+        const isXbloodyx =
+          charName === 'xbloodyx' ||
+          d.id.toLowerCase().includes('xbloodyx') ||
+          String(data.userUid || '') === 'fixed-xbloodyx';
+
+        const isWeekendGloomOldSlot =
+          respawnName === 'gloom pillars' &&
+          (day === 'saturday' || day === 'sunday') &&
+          isXbloodyx &&
+          (timeSlot.includes('19:15') ||
+            ((d.id === 'fixed-b3-xbloodyx1-sat-1' || d.id === 'fixed-b3-xbloodyx1-sun-1') &&
+              !timeSlot.includes('21:00')));
+
+        if (isWeekendGloomOldSlot) {
+          gloomBatch.delete(d.ref);
+          gloomBatch.delete(doc(db, 'reservation_details', d.id));
+          gloomRemovedCount++;
+        }
+      }
+
+      gloomBatch.set(gloomMigrationRef, {
+        migratedAt: new Date().toISOString(),
+        removedCount: gloomRemovedCount,
+      });
+      await gloomBatch.commit();
+      if (gloomRemovedCount > 0) {
+        console.info(`Cleaned ${gloomRemovedCount} legacy Gloom Pillars Xbloodyx reservation(s).`);
+      }
+    }
+
+    // Backfill claimReservationId on any existing released_respawns docs so members can claim them atomically
+    const releasedSnap = await getDocs(collection(db, 'released_respawns'));
+    const releasedToPatch = releasedSnap.docs.filter(d => !d.data().claimReservationId);
+    if (releasedToPatch.length > 0) {
+      const relBatch = writeBatch(db);
+      releasedToPatch.forEach(d => {
+        const rd = d.data() as Partial<ReleasedRespawn>;
+        if (rd.day && rd.respawnName && rd.timeSlot) {
+          const claimReservationId = `${rd.day}_${rd.respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${rd.timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
+          relBatch.update(d.ref, { claimReservationId });
+        }
+      });
+      await relBatch.commit();
+    }
+
+    // Backfill sharedViewerUids, partyMemberUids, and isPublicVisibility on existing reservation_details
+    const [allDetailsSnap, dirSnap] = await Promise.all([
+      getDocs(collection(db, 'reservation_details')),
+      getDocs(collection(db, 'member_directory')),
+    ]);
+    const dirShareMap = new Map<string, string[]>();
+    dirSnap.docs.forEach(d => {
+      const dd = d.data() as Partial<MemberDirectoryProfile>;
+      if (Array.isArray(dd.sharedWith)) {
+        dirShareMap.set(d.id, dd.sharedWith);
+      }
+    });
+    const detailsToPatch = allDetailsSnap.docs.filter(d => {
+      const data = d.data() as Record<string, unknown>;
+      return (
+        data.sharedViewerUids === undefined ||
+        data.partyMemberUids === undefined ||
+        data.isPublicVisibility === undefined
+      );
+    });
+    if (detailsToPatch.length > 0) {
+      for (let i = 0; i < detailsToPatch.length; i += 200) {
+        const patchBatch = writeBatch(db);
+        detailsToPatch.slice(i, i + 200).forEach(d => {
+          const data = d.data() as Partial<ReservationDetails>;
+          const ownerShared = data.userUid ? (dirShareMap.get(data.userUid) || []) : [];
+          patchBatch.update(d.ref, {
+            sharedViewerUids: data.sharedViewerUids ?? ownerShared,
+            partyMemberUids: data.partyMemberUids ?? [],
+            isPublicVisibility: data.isPublicVisibility ?? false,
+          });
+        });
+        await patchBatch.commit();
       }
     }
 
@@ -687,14 +1062,69 @@ export async function getReleasedRespawns(): Promise<ReleasedRespawn[]> {
 
 export async function addReleasedRespawn(data: Omit<ReleasedRespawn, 'id'>): Promise<void> {
   const id = `${data.day}_${data.respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${data.timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}_${Date.now()}`;
+  const claimReservationId =
+    data.claimReservationId ||
+    `${data.day}_${data.respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${data.timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
   const path = `released_respawns/${id}`;
   try {
-    await setDoc(doc(db, 'released_respawns', id), {
+    await setDoc(doc(db, 'released_respawns', id), cleanData({
       ...data,
       id,
-    });
+      claimReservationId,
+    } as unknown as Record<string, unknown>));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function claimReleasedRespawn(
+  releasedItem: ReleasedRespawn,
+  reservation: Reservation
+): Promise<void> {
+  const path = `released_respawns/${releasedItem.id}`;
+  const targetReservationId = releasedItem.claimReservationId || reservation.id;
+  try {
+    const sharedViewerUids =
+      reservation.sharedViewerUids ?? (await resolveOwnerSharedWith(reservation.userUid));
+    const batch = writeBatch(db);
+    const nowIso = new Date().toISOString();
+
+    const publicSlot: Record<string, unknown> = {
+      id: targetReservationId,
+      day: reservation.day,
+      slotType: reservation.slotType,
+      timeSlot: reservation.timeSlot,
+      respawnName: reservation.respawnName,
+      userUid: reservation.userUid,
+      isOccupied: true,
+      isPublicVisibility: reservation.isPublicVisibility ?? false,
+      partyMemberUids: reservation.partyMemberUids || [],
+      reservedAt: reservation.reservedAt || nowIso,
+      releasedRespawnId: releasedItem.id,
+    };
+
+    const privateDetails: Record<string, unknown> = {
+      id: targetReservationId,
+      charName: reservation.charName || '',
+      userUid: reservation.userUid,
+      userRank: reservation.userRank || 'Member',
+      partyMembers: reservation.partyMembers || '',
+      partyMemberUids: reservation.partyMemberUids || [],
+      sharedViewerUids,
+      isPublicVisibility: reservation.isPublicVisibility ?? false,
+      notes: reservation.notes || '',
+      createdAt: reservation.reservedAt || nowIso,
+      updatedAt: nowIso,
+      releasedRespawnId: releasedItem.id,
+    };
+
+    batch.delete(doc(db, 'released_respawns', releasedItem.id));
+    batch.set(doc(db, 'reservations', targetReservationId), cleanData(publicSlot));
+    batch.set(doc(db, 'reservation_details', targetReservationId), cleanData(privateDetails));
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
   }
 }
 
@@ -780,6 +1210,197 @@ export function subscribeToLfgPosts(
     }
   );
 }
+
+// ---- ADMIN SPECIAL RESPAWNS BACKUPS ----
+export function isSpecialReservation(r: Pick<Reservation, 'slotType' | 'respawnName'>): boolean {
+  if (r.slotType === 'planilhados' || r.slotType === '3h') return true;
+  const cleanName = (r.respawnName || '')
+    .replace(/^[A-Z0-9]+\s*—\s*/i, '')
+    .replace(/[()]/g, '')
+    .trim()
+    .toLowerCase();
+  const specialSet = new Set(
+    [...PLANILHADOS_RESPAWNS, ...THREE_HOUR_RESPAWNS].map(n => n.trim().toLowerCase())
+  );
+  return specialSet.has(cleanName);
+}
+
+export async function saveSpecialRespawnsBackup(
+  backup: Omit<SpecialRespawnsBackup, 'id'>
+): Promise<SpecialRespawnsBackup> {
+  const id = `backup-${Date.now()}`;
+  const path = `admin_backups/${id}`;
+  try {
+    const cleanedReservations = backup.reservations.map(r =>
+      cleanData(r as unknown as Record<string, unknown>)
+    );
+    const cleanedCustomRespawns = (backup.slotsConfig?.customSpecialRespawns || []).map(c =>
+      cleanData(c as unknown as Record<string, unknown>)
+    );
+
+    const payload = cleanData({
+      id,
+      name: backup.name,
+      createdAt: backup.createdAt || new Date().toISOString(),
+      createdBy: backup.createdBy,
+      specialCount: backup.specialCount,
+      respawnsCount: backup.respawnsCount,
+      reservations: cleanedReservations,
+      slotsConfig: backup.slotsConfig
+        ? {
+            baseSlotsMap: backup.slotsConfig.baseSlotsMap,
+            slotsByDay: backup.slotsConfig.slotsByDay || {},
+            customSpecialRespawns: cleanedCustomRespawns,
+          }
+        : undefined,
+    } as unknown as Record<string, unknown>);
+
+    await setDoc(doc(db, 'admin_backups', id), payload);
+    return {
+      ...backup,
+      id,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export function subscribeToSpecialRespawnsBackups(
+  callback: (list: SpecialRespawnsBackup[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const path = 'admin_backups';
+  return onSnapshot(
+    collection(db, path),
+    snapshot => {
+      const list = snapshot.docs.map(d => ({
+        id: d.id,
+        ...(d.data() as Omit<SpecialRespawnsBackup, 'id'>),
+      }));
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(list);
+    },
+    error => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function deleteSpecialRespawnsBackup(backupId: string): Promise<void> {
+  const path = `admin_backups/${backupId}`;
+  try {
+    await deleteDoc(doc(db, 'admin_backups', backupId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
+export async function restoreSpecialRespawnsBackup(
+  reservationsToRestore: Reservation[],
+  customSpecialRespawns?: CustomRespawn[]
+): Promise<number> {
+  const path = 'reservations';
+  try {
+    // 1. Fetch existing reservations and delete all special ones (leave normal 2h20m reservations untouched)
+    const snap = await getDocs(collection(db, 'reservations'));
+    const existingSpecialDocs = snap.docs.filter(d => {
+      const data = d.data() as Partial<Reservation>;
+      return isSpecialReservation({
+        slotType: (data.slotType as Reservation['slotType']) || 'normal',
+        respawnName: String(data.respawnName || ''),
+      });
+    });
+
+    const deleteChunkSize = 180;
+    for (let i = 0; i < existingSpecialDocs.length; i += deleteChunkSize) {
+      const chunk = existingSpecialDocs.slice(i, i + deleteChunkSize);
+      const batch = writeBatch(db);
+      chunk.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+        batch.delete(doc(db, 'reservation_details', docSnap.id));
+      });
+      await batch.commit();
+    }
+
+    // 2. Restore backed-up special reservations split cleanly into zero-knowledge public/private collections
+    const validReservations = reservationsToRestore.filter(
+      r => r && r.id && r.day && r.respawnName && r.timeSlot
+    );
+
+    const writeChunkSize = 180;
+    for (let i = 0; i < validReservations.length; i += writeChunkSize) {
+      const chunk = validReservations.slice(i, i + writeChunkSize);
+      const batch = writeBatch(db);
+
+      chunk.forEach(r => {
+        const publicSlot: Record<string, unknown> = {
+          id: r.id,
+          day: r.day,
+          slotType: r.slotType || 'planilhados',
+          timeSlot: r.timeSlot,
+          respawnName: r.respawnName,
+          userUid: r.userUid || `fixed-${(r.charName || 'player').toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+          isOccupied: true,
+          isPublicVisibility: r.isPublicVisibility ?? false,
+          partyMemberUids: r.partyMemberUids || [],
+          reservedAt: r.reservedAt || new Date().toISOString(),
+        };
+
+        const privateDetails: Record<string, unknown> = {
+          id: r.id,
+          charName: r.charName || '',
+          userUid: publicSlot.userUid,
+          userRank: r.userRank || 'Member',
+          partyMembers: r.partyMembers || '',
+          partyMemberUids: r.partyMemberUids || [],
+          sharedViewerUids: r.sharedViewerUids || [],
+          isPublicVisibility: r.isPublicVisibility ?? false,
+          notes: r.notes || '',
+          createdAt: r.reservedAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        batch.set(doc(db, 'reservations', r.id), cleanData(publicSlot));
+        batch.set(doc(db, 'reservation_details', r.id), cleanData(privateDetails));
+      });
+
+      await batch.commit();
+    }
+
+    // 3. Restore any missing custom 3h special respawns included in the backup
+    if (customSpecialRespawns && customSpecialRespawns.length > 0) {
+      const customSnap = await getDocs(collection(db, 'custom_respawns'));
+      const existingCustomIds = new Set(customSnap.docs.map(d => d.id));
+      const customBatch = writeBatch(db);
+      let hasCustomWrites = false;
+
+      customSpecialRespawns.forEach(c => {
+        if (c.id && c.name && !existingCustomIds.has(c.id)) {
+          customBatch.set(doc(db, 'custom_respawns', c.id), cleanData({
+            name: c.name,
+            type: c.type || '3h',
+            addedBy: c.addedBy || 'backup-restore',
+            createdAt: c.createdAt || new Date().toISOString(),
+          }));
+          hasCustomWrites = true;
+        }
+      });
+
+      if (hasCustomWrites) {
+        await customBatch.commit();
+      }
+    }
+
+    return validReservations.length;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
 
 
 

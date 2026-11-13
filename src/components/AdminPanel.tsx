@@ -40,14 +40,16 @@ import {
   Wifi,
   WifiOff,
   Zap,
+  Eye,
   EyeOff,
   FileSpreadsheet,
   UserCheck,
-  UserX,
   Clock,
   Copy,
+  Archive,
 } from 'lucide-react';
 import { ExportModal } from './ExportModal';
+import { SpecialBackupPanel } from './SpecialBackupPanel';
 
 interface AdminPanelProps {
   usersList: UserProfile[];
@@ -63,7 +65,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   customRespawns = [],
 }) => {
   const { currentUser } = useAuth();
-  const [activeSubTab, setActiveSubTab] = useState<'assign' | 'emails' | 'apis' | 'released'>('assign');
+  const [activeSubTab, setActiveSubTab] = useState<'assign' | 'emails' | 'apis' | 'released' | 'backup'>('assign');
   const [releasedRespawnsList, setReleasedRespawnsList] = useState<ReleasedRespawn[]>([]);
   const [isExcelBackupOpen, setIsExcelBackupOpen] = useState(false);
 
@@ -126,11 +128,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Assign Respawn Modal State
   const [assignUser, setAssignUser] = useState<UserProfile | null>(null);
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
-
-  // Special Schedule Players State
-  const [specialSearch, setSpecialSearch] = useState('');
-  const [quickAuthorizeEmail, setQuickAuthorizeEmail] = useState<Record<string, string>>({});
-  const [savingQuickEmail, setSavingQuickEmail] = useState<string | null>(null);
 
   // Allowed Emails State
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
@@ -346,87 +343,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         return true;
       })
       .sort((a, b) => {
+        const idxA = PRIORITY_RANKS.indexOf(a.rank);
+        const idxB = PRIORITY_RANKS.indexOf(b.rank);
+        const rankIndexA = idxA === -1 ? 999 : idxA;
+        const rankIndexB = idxB === -1 ? 999 : idxB;
+        if (rankIndexA !== rankIndexB) return rankIndexA - rankIndexB;
+
         const aOnline = isOnlineHelper(a);
         const bOnline = isOnlineHelper(b);
         if (aOnline !== bOnline) return aOnline ? -1 : 1;
-        const rankIndexA = PRIORITY_RANKS.indexOf(a.rank);
-        const rankIndexB = PRIORITY_RANKS.indexOf(b.rank);
-        if (rankIndexA !== rankIndexB) return rankIndexA - rankIndexB;
+
         return a.charName.localeCompare(b.charName);
       });
   }, [usersList, selectedRank, filterOnlineOnly, hiddenPlayerUids, searchQuery, currentUser]);
-
-  // Special Schedule Players Tracking & Dynamic Linking
-  const specialPlayersWithStatus = useMemo(() => {
-    const userMap = new Map<string, UserProfile>();
-    usersList.forEach(u => {
-      if (u.charName) {
-        userMap.set(u.charName.trim().toLowerCase(), u);
-      }
-    });
-
-    return SPECIAL_SCHEDULE_PLAYERS.map(p => {
-      const matched =
-        userMap.get(p.charName.trim().toLowerCase()) ||
-        (p.playerOwner ? userMap.get(p.playerOwner.trim().toLowerCase()) : undefined);
-      const isOnline = matched ? isOnlineHelper(matched) : false;
-      return {
-        ...p,
-        isRegistered: Boolean(matched),
-        userProfile: matched || null,
-        isOnline,
-      };
-    });
-  }, [usersList, currentUser]);
-
-  const specialSummaryStats = useMemo(() => {
-    const total = SPECIAL_SCHEDULE_PLAYERS.length;
-    const linked = specialPlayersWithStatus.filter(p => p.isRegistered).length;
-    const pending = total - linked;
-    return { total, linked, pending };
-  }, [specialPlayersWithStatus]);
-
-  // Pending Special Schedule Players (Strictly filtered to un-registered players)
-  const pendingSpecialPlayers = useMemo(() => {
-    return specialPlayersWithStatus.filter(p => !p.isRegistered);
-  }, [specialPlayersWithStatus]);
-
-  const filteredSpecialPlayers = useMemo(() => {
-    return pendingSpecialPlayers.filter(p => {
-      if (specialSearch.trim()) {
-        const q = specialSearch.toLowerCase();
-        const matchName = p.charName.toLowerCase().includes(q);
-        const matchRespawns = p.respawnsSummary.toLowerCase().includes(q);
-        const matchRank = p.suggestedRank.toLowerCase().includes(q);
-        if (!matchName && !matchRespawns && !matchRank) return false;
-      }
-      return true;
-    });
-  }, [pendingSpecialPlayers, specialSearch]);
-
-  const handleQuickAddSpecialEmail = async (charName: string) => {
-    const emailToAdd = quickAuthorizeEmail[charName]?.trim();
-    if (!emailToAdd) return;
-    setSavingQuickEmail(charName);
-    try {
-      await addAllowedEmail(
-        emailToAdd,
-        'member',
-        currentUser?.email || 'admin',
-        `Horário Especial: ${charName}`
-      );
-      await loadEmails();
-      setToastMessage(`E-mail ${emailToAdd} autorizado para ${charName}!`);
-      setQuickAuthorizeEmail(prev => ({ ...prev, [charName]: '' }));
-      setTimeout(() => setToastMessage(null), 4000);
-    } catch (err) {
-      console.error(err);
-      setToastMessage('Falha ao autorizar e-mail.');
-      setTimeout(() => setToastMessage(null), 4000);
-    } finally {
-      setSavingQuickEmail(null);
-    }
-  };
 
   const handleAddEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -514,58 +443,58 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       )}
 
       {/* Admin Panel Header & Sub-Tabs */}
-      <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="rounded-2xl border border-slate-200/90 bg-white p-3.5 sm:p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3.5 sm:gap-4">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-500/25 shrink-0">
-              <ShieldCheck className="h-6 w-6" />
+            <span className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-500/25 shrink-0">
+              <ShieldCheck className="h-5 w-5 sm:h-6 sm:w-6" />
             </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-black text-slate-900 dark:text-white">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight">
                   Painel Administrativo Major
                 </h2>
-                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800 tabular-nums">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  {rankStats.all.online} Online no App
+                  {rankStats.all.online} Online
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Filtre por rank e atribua respawns para os membros conectados em tempo real.
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Filtre por rank e atribua respawns em tempo real.
               </p>
             </div>
           </div>
 
           {/* Sub-tabs navigation */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl overflow-x-auto">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
+            <div className="grid grid-cols-2 sm:flex sm:items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl">
               <button
                 onClick={() => setActiveSubTab('assign')}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 min-h-[40px] py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                   activeSubTab === 'assign'
                     ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
                 title="Lista e presença de membros da guilda"
               >
-                <Users className="h-3.5 w-3.5" />
-                <span>Membros & Fila</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                <Users className="h-3.5 w-3.5 shrink-0" />
+                <span>Membros</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold tabular-nums ${
                   activeSubTab === 'assign' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
                 }`}>
-                  {rankStats.all.online} online
+                  {rankStats.all.online}
                 </span>
               </button>
 
             <button
               onClick={() => setActiveSubTab('emails')}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 min-h-[40px] py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                 activeSubTab === 'emails'
                   ? 'bg-white text-blue-600 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <span>E-mails Autorizados ({allowedEmails.length})</span>
+              <span>E-mails ({allowedEmails.length})</span>
             </button>
 
             <button
@@ -573,26 +502,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 setActiveSubTab('apis');
                 if (!guildHighscoresData) loadGuildHighscores();
               }}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 min-h-[40px] py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                 activeSubTab === 'apis'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Zap className="h-3.5 w-3.5" />
-              <span>APIs</span>
+              <Zap className="h-3.5 w-3.5 shrink-0" />
+              <span>APIs & XP</span>
             </button>
 
             <button
               onClick={() => setActiveSubTab('released')}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 min-h-[40px] py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                 activeSubTab === 'released'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Zap className="h-3.5 w-3.5" />
-              <span>Respaws Liberados ({releasedRespawnsList.length})</span>
+              <Zap className="h-3.5 w-3.5 shrink-0" />
+              <span>Liberados ({releasedRespawnsList.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveSubTab('backup')}
+              className={`col-span-2 sm:col-span-1 flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 min-h-[40px] py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'backup'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+              title="Backup e restauração da configuração dos respawns especiais"
+            >
+              <Archive className="h-3.5 w-3.5 shrink-0" />
+              <span>Backup Especiais</span>
             </button>
           </div>
 
@@ -603,10 +545,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               setAssignUser(null);
               setIsAssignModalOpen(true);
             }}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white shadow-md shadow-blue-500/25 transition-all cursor-pointer whitespace-nowrap active:scale-95"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 min-h-[44px] sm:min-h-[40px] py-2.5 sm:py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white shadow-md shadow-blue-500/25 transition-all cursor-pointer whitespace-nowrap active:scale-[0.98]"
             title="Abrir modal para cadastrar respawns"
           >
-            <Target className="h-4 w-4" />
+            <Target className="h-4 w-4 shrink-0" />
             <span>+ Cadastrar Respawn</span>
           </button>
         </div>
@@ -618,178 +560,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* ======================================================== */}
       {activeSubTab === 'assign' && (
         <div className="space-y-5">
-          {/* ======================================================== */}
-          {/* VÍNCULO DOS HORÁRIOS ESPECIAIS (APENAS PENDENTES)        */}
-          {/* ======================================================== */}
-          <div className="rounded-2xl border border-amber-200/80 dark:border-amber-900/60 bg-gradient-to-br from-amber-50/30 via-white to-slate-50/50 dark:from-slate-900 dark:via-slate-900 dark:to-amber-950/20 p-5 shadow-sm space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-amber-100 dark:border-amber-900/40">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="p-1.5 rounded-lg bg-amber-500 text-white shadow-sm shadow-amber-500/25">
-                    <AlertCircle className="h-4 w-4" />
-                  </span>
-                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                    Vínculo de Horários Especiais — Pendentes de Cadastro
-                  </h3>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                    {filteredSpecialPlayers.length} {filteredSpecialPlayers.length === 1 ? 'Pendente' : 'Pendentes'}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  Mostrando apenas os jogadores que possuem horários especiais na planilha e ainda não efetuaram o primeiro login no app. Os jogadores já cadastrados já estão vinculados e gerenciando seus horários em "Meus Controles".
-                </p>
-              </div>
-
-              {/* Status Counters */}
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-xs font-bold text-amber-800 dark:text-amber-300">
-                  <UserX className="h-4 w-4 text-amber-600" />
-                  <span>{specialSummaryStats.pending} Pendentes</span>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-800 dark:text-emerald-300" title="Jogadores já cadastrados com vínculo ativo">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  <span>{specialSummaryStats.linked} Já Vinculados</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Search Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                {filteredSpecialPlayers.length > 0 ? (
-                  <span>Jogadores que precisam efetuar login ou ter o e-mail pré-autorizado:</span>
-                ) : null}
-              </div>
-
-              <div className="relative w-full sm:w-72">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                <input
-                  type="text"
-                  value={specialSearch}
-                  onChange={e => setSpecialSearch(e.target.value)}
-                  placeholder="Buscar jogador pendente ou respawn..."
-                  className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                />
-              </div>
-            </div>
-
-            {/* List / Cards of Pending Players */}
-            {filteredSpecialPlayers.length === 0 ? (
-              <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 p-6 text-center space-y-2">
-                <CheckCircle2 className="h-8 w-8 text-emerald-600 dark:text-emerald-400 mx-auto" />
-                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-200">
-                  {specialSearch.trim() ? 'Nenhum jogador pendente encontrado para a busca.' : 'Nenhum jogador pendente!'}
-                </p>
-                <p className="text-xs text-emerald-700 dark:text-emerald-400 max-w-md mx-auto">
-                  {specialSearch.trim()
-                    ? 'Tente pesquisar por outro nome ou respawn.'
-                    : `Todos os ${specialSummaryStats.total} jogadores com horários especiais já efetuaram login e estão com seus vínculos ativos no sistema.`}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filteredSpecialPlayers.map(p => {
-                  const rankMeta = RANK_METADATA[p.suggestedRank];
-                  return (
-                    <div
-                      key={p.charName}
-                      className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-slate-900 p-3.5 flex flex-col justify-between gap-3 transition-all hover:border-amber-300 dark:hover:border-amber-800 shadow-xs"
-                    >
-                      <div className="space-y-2">
-                        {/* Top Header: Character Name + Rank & Status Badge */}
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-black text-sm text-slate-900 dark:text-white">
-                                {p.charName}
-                              </span>
-                            </div>
-                            <span
-                              className={`inline-block mt-0.5 px-1.5 py-0.2 rounded text-[10px] font-extrabold border ${rankMeta.badgeClass}`}
-                            >
-                              {p.suggestedRank}
-                            </span>
-                          </div>
-
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                            <AlertCircle className="h-3 w-3 text-amber-600" />
-                            <span>Pendente</span>
-                          </span>
-                        </div>
-
-                        {/* Respawns Info */}
-                        <div className="flex items-start gap-1.5 text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-100 dark:border-slate-800">
-                          <Clock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
-                          <span className="text-[11px] leading-tight font-medium">
-                            {p.respawnsSummary}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Quick Authorization Action */}
-                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] space-y-1.5">
-                        <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                          Ainda não fez login com Google no app:
-                        </p>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="email"
-                            placeholder="E-mail Gmail do jogador..."
-                            value={quickAuthorizeEmail[p.charName] || ''}
-                            onChange={e => setQuickAuthorizeEmail(prev => ({ ...prev, [p.charName]: e.target.value }))}
-                            className="w-full px-2 py-1 rounded text-[11px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleQuickAddSpecialEmail(p.charName)}
-                            disabled={savingQuickEmail === p.charName || !quickAuthorizeEmail[p.charName]?.trim()}
-                            className="px-2 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] transition-all disabled:opacity-50 shrink-0 cursor-pointer"
-                            title="Autorizar e-mail deste jogador na lista de permissões"
-                          >
-                            {savingQuickEmail === p.charName ? '...' : '+ Autorizar'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
           {/* Rank Filter Control Card */}
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors space-y-4">
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-3.5 sm:p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors space-y-3.5 sm:space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <Filter className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                     Filtro por Rank & Presença Online
                   </h3>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Conforme a regra do Major, apenas o admin e líderes marcam respawns. Filtre pelo rank desejado e escolha entre os jogadores online no app.
+                  Filtre pelo rank desejado e escolha entre os jogadores online no app.
                 </p>
               </div>
 
               {/* Online Only Toggle */}
-              <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60 self-start sm:self-auto">
+              <div className="grid grid-cols-2 sm:flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/60 dark:border-slate-700/60 w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => setFilterOnlineOnly(true)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  className={`flex items-center justify-center gap-1.5 px-3 min-h-[38px] py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                     filterOnlineOnly
                       ? 'bg-emerald-600 text-white shadow-xs'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                   }`}
                 >
-                  <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
-                  <span>Apenas Online ({rankStats.all.online})</span>
+                  <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse shrink-0" />
+                  <span>Online ({rankStats.all.online})</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setFilterOnlineOnly(false)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  className={`flex items-center justify-center px-3 min-h-[38px] py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                     !filterOnlineOnly
                       ? 'bg-white text-slate-900 dark:bg-slate-900 dark:text-white shadow-xs'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -805,19 +608,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
                 Selecione o Rank de Prioridade:
               </label>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar sm:flex-wrap -mx-1 px-1 pb-1">
                 {/* 'All' chip */}
                 <button
                   type="button"
                   onClick={() => setSelectedRank('all')}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  className={`flex items-center gap-2 px-3.5 min-h-[40px] py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                     selectedRank === 'all'
                       ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 shadow-sm ring-1 ring-blue-500/20'
                       : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 hover:border-slate-300'
                   }`}
                 >
                   <span>Todos os Ranks</span>
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-extrabold text-slate-700 dark:text-slate-200">
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-extrabold text-slate-700 dark:text-slate-200 tabular-nums">
                     {filterOnlineOnly ? rankStats.all.online : rankStats.all.total}
                   </span>
                 </button>
@@ -833,7 +636,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       key={rank}
                       type="button"
                       onClick={() => setSelectedRank(rank)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      className={`flex items-center gap-2 px-3 min-h-[40px] py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                         isSelected
                           ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 shadow-sm ring-1 ring-blue-500/20'
                           : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
@@ -844,7 +647,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       >
                         {rank}
                       </span>
-                      <span className="flex items-center gap-1 text-[11px] font-extrabold">
+                      <span className="flex items-center gap-1 text-[11px] font-extrabold tabular-nums">
                         {stat.online > 0 && (
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                         )}
@@ -860,19 +663,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             {/* Quick search input & stats notice */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 pt-1 sm:pt-2">
               <div className="relative w-full sm:w-80">
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="Filtrar por char, vocação ou guilda..."
-                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 pl-9 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full min-h-[42px] sm:min-h-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 pl-9 text-sm sm:text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-3.5 sm:w-3.5 text-slate-400" />
               </div>
 
-              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums">
                 Mostrando <strong className="text-slate-900 dark:text-white font-bold">{filteredUsers.length}</strong> jogador(es)
                 {filterOnlineOnly && ' online no aplicativo'}
                 {selectedRank !== 'all' && ` do rank ${selectedRank}`}.
@@ -882,28 +685,63 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
           {/* Characters Grid / Roster for Quick Assignment */}
           <div className="rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center justify-between">
+            <div className="p-3.5 sm:p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
               <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <Target className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                  Jogadores Aptos para Escalação Imediata
+                  Jogadores Aptos para Escalação
                 </h4>
               </div>
               <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                Clique em <strong>Atribuir Respawn</strong> para alocar dia e horário
+                Toque em <strong>Atribuir Respawn</strong> para alocar dia e horário
               </span>
             </div>
 
             {hiddenPlayerUids.length > 0 && (
-              <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border-b border-blue-100 dark:border-blue-900/60 flex items-center justify-between text-xs text-blue-800 dark:text-blue-300">
-                <span>Você ocultou <strong>{hiddenPlayerUids.length}</strong> jogador(es) desta lista.</span>
-                <button
-                  type="button"
-                  onClick={() => setHiddenPlayerUids([])}
-                  className="font-bold underline hover:text-blue-900 dark:hover:text-blue-200 cursor-pointer"
-                >
-                  Exibir novamente
-                </button>
+              <div className="p-3.5 bg-blue-50/90 dark:bg-blue-950/40 border-b border-blue-100 dark:border-blue-900/60 space-y-2.5 text-xs text-blue-800 dark:text-blue-300">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span>
+                    Você ocultou <strong>{hiddenPlayerUids.length}</strong> jogador(es). Clique em um nome abaixo para voltar apenas ele:
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {hiddenPlayerUids.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setHiddenPlayerUids(prev => prev.slice(0, -1))}
+                        className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 font-bold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors cursor-pointer"
+                      >
+                        Desfazer último
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setHiddenPlayerUids([])}
+                      className="font-bold underline hover:text-blue-900 dark:hover:text-blue-200 cursor-pointer"
+                    >
+                      Exibir todos
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {hiddenPlayerUids.map(uid => {
+                    const hiddenUser = usersList.find(u => u.uid === uid);
+                    if (!hiddenUser) return null;
+                    return (
+                      <button
+                        key={uid}
+                        type="button"
+                        onClick={() => setHiddenPlayerUids(prev => prev.filter(id => id !== uid))}
+                        title={`Exibir apenas ${hiddenUser.charName} novamente`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 text-[11px] font-bold text-slate-800 dark:text-slate-200 hover:border-blue-400 hover:bg-blue-100/70 dark:hover:bg-blue-900/50 transition-all cursor-pointer shadow-2xs"
+                      >
+                        <Eye className="h-3 w-3 text-blue-600 dark:text-blue-400 shrink-0" />
+                        <span>{hiddenUser.charName}</span>
+                        <X className="h-3 w-3 text-slate-400 hover:text-blue-600 shrink-0" />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -940,11 +778,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   return (
                     <div
                       key={user.uid}
-                      className="p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
+                      className="p-3.5 sm:p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4"
                     >
                       {/* Left: Player identity & presence */}
-                      <div className="flex items-start gap-3.5">
-                        <div className="relative mt-0.5">
+                      <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+                        <div className="relative mt-0.5 shrink-0">
                           <span
                             className={`flex h-10 w-10 items-center justify-center rounded-xl font-bold text-sm border shadow-xs ${
                               rankMeta?.badgeClass || 'bg-slate-100 text-slate-800'
@@ -962,9 +800,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           />
                         </div>
 
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                            <h4 className="text-sm font-black text-slate-900 dark:text-white break-words">
                               {user.charName}
                             </h4>
                             <span
@@ -977,7 +815,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             {online ? (
                               <span className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.2 rounded-full">
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                Online no App
+                                Online
                               </span>
                             ) : (
                               <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded">
@@ -991,12 +829,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             )}
                           </div>
 
-                          <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400 mt-1">
                             <span>Guild: <strong className="text-slate-700 dark:text-slate-300">{user.guildName}</strong></span>
                             <span>•</span>
-                            <span>Lv {user.level} {user.vocation}</span>
-                            <span>•</span>
-                            <span className="text-slate-400 font-mono text-[11px]">{user.email}</span>
+                            <span className="tabular-nums">Lv {user.level} {user.vocation}</span>
+                            <span className="hidden sm:inline">•</span>
+                            <span className="text-slate-400 font-mono text-[11px] break-all sm:break-normal w-full sm:w-auto">{user.email}</span>
                           </div>
 
                           {/* Current reservations list */}
@@ -1012,13 +850,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               userBookings.map(b => (
                                 <span
                                   key={b.id}
-                                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60"
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60"
                                 >
                                   <span className="uppercase font-extrabold">
                                     {b.day === 'friday' ? 'SEX' : b.day === 'saturday' ? 'SÁB' : 'DOM'}
                                   </span>
                                   <span>{b.respawnName}</span>
-                                  <span className="font-mono text-slate-500 dark:text-slate-400">({b.timeSlot})</span>
+                                  <span className="font-mono text-slate-500 dark:text-slate-400 tabular-nums">({b.timeSlot})</span>
                                   <button
                                     type="button"
                                     onClick={async (e) => {
@@ -1031,7 +869,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         console.error(err);
                                       }
                                     }}
-                                    className="p-0.5 rounded hover:bg-rose-100 dark:hover:bg-rose-950 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
+                                    className="p-1 rounded hover:bg-rose-100 dark:hover:bg-rose-950 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
                                     title="Excluir esta marcação imediatamente"
                                   >
                                     <Trash2 className="h-3 w-3" />
@@ -1044,11 +882,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
 
                       {/* Right: Action buttons */}
-                      <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                      <div className="w-full md:w-auto grid grid-cols-2 sm:flex items-center gap-2 md:self-center shrink-0 pt-1 md:pt-0">
                         <button
                           type="button"
                           onClick={() => openEditModal(user)}
-                          className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
+                          className="flex items-center justify-center gap-1.5 px-3 min-h-[42px] py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
                           title="Editar rank ou nome do personagem"
                         >
                           <Edit2 className="h-3.5 w-3.5" />
@@ -1062,7 +900,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               prev.includes(user.uid) ? prev : [...prev, user.uid]
                             );
                           }}
-                          className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
+                          className="flex items-center justify-center gap-1.5 px-3 min-h-[42px] py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
                           title="Ocultar jogador da lista após marcar os respawns"
                         >
                           <EyeOff className="h-3.5 w-3.5" />
@@ -1075,7 +913,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             setAssignUser(user);
                             setIsAssignModalOpen(true);
                           }}
-                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all cursor-pointer"
+                          className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 px-4 min-h-[42px] py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap"
                         >
                           <Target className="h-4 w-4" />
                           <span>Atribuir Respawn</span>
@@ -1096,29 +934,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* SUB-TAB 3: ALLOWED EMAILS                                */}
       {/* ======================================================== */}
       {activeSubTab === 'emails' && (
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
+        <div className="space-y-4 sm:space-y-6">
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1.5 sm:mb-3">
               Autorizar Novo E-mail de Membro
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3.5 sm:mb-4">
               Apenas e-mails cadastrados aqui conseguem fazer login no aplicativo e vincular seus personagens do Tibia.
             </p>
 
-            <form onSubmit={handleAddEmail} className="flex flex-col sm:flex-row gap-3">
+            <form onSubmit={handleAddEmail} className="flex flex-col sm:flex-row gap-2.5 sm:gap-3">
               <input
                 type="email"
                 value={newEmail}
                 onChange={e => setNewEmail(e.target.value)}
                 placeholder="exemplo@gmail.com"
                 required
-                className="flex-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-white"
+                className="flex-1 min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-sm sm:text-xs text-slate-900 dark:text-white"
               />
 
               <select
                 value={newRole}
                 onChange={e => setNewRole(e.target.value as 'admin' | 'member')}
-                className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white"
+                className="min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm sm:text-xs font-semibold text-slate-900 dark:text-white"
               >
                 <option value="member">Membro Regular</option>
                 <option value="admin">Administrador</option>
@@ -1129,12 +967,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 value={newNote}
                 onChange={e => setNewNote(e.target.value)}
                 placeholder="Nota (Ex: Líder Missclick)"
-                className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white"
+                className="min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm sm:text-xs text-slate-900 dark:text-white"
               />
 
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 px-4 min-h-[44px] sm:min-h-0 py-2.5 sm:py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap"
               >
                 <UserPlus className="h-4 w-4" />
                 <span>Autorizar</span>
@@ -1142,11 +980,58 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </form>
           </div>
 
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
               E-mails Autorizados Atualmente ({allowedEmails.length})
             </h3>
-            <div className="overflow-x-auto">
+
+            {/* Mobile Card List */}
+            <div className="md:hidden space-y-2.5">
+              {allowedEmails.map(item => (
+                <div
+                  key={item.id}
+                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex items-start justify-between gap-2.5"
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="text-xs font-bold text-slate-900 dark:text-white break-all">
+                      {item.email}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          item.role === 'admin'
+                            ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300'
+                            : 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
+                        }`}
+                      >
+                        {item.role === 'admin' ? 'Administrador' : 'Membro'}
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400">
+                        por {item.addedBy}
+                      </span>
+                      <span className="text-slate-400 tabular-nums">
+                        • {new Date(item.createdAt).toLocaleDateString('pt-BR')}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRemoveEmail(item.email)}
+                    className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer shrink-0"
+                    title="Remover autorização"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+              {allowedEmails.length === 0 && !loadingEmails && (
+                <div className="p-6 text-center text-xs text-slate-400">
+                  Nenhum e-mail adicional autorizado no momento.
+                </div>
+              )}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
@@ -1175,7 +1060,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </span>
                       </td>
                       <td className="p-3 text-slate-500">{item.addedBy}</td>
-                      <td className="p-3 text-slate-400">
+                      <td className="p-3 text-slate-400 tabular-nums">
                         {new Date(item.createdAt).toLocaleDateString('pt-BR')}
                       </td>
                       <td className="p-3 text-right">
@@ -1207,27 +1092,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* SUB-TAB: APIS & MAINTENANCE                              */}
       {/* ======================================================== */}
       {activeSubTab === 'apis' && (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           {/* Excel Backup Box for Admins */}
-          <div className="rounded-2xl border border-emerald-200/90 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-6 shadow-sm">
+          <div className="rounded-2xl border border-emerald-200/90 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-4 sm:p-6 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-start gap-3.5">
                 <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-500/25 shrink-0">
                   <FileSpreadsheet className="h-5 w-5" />
                 </span>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
                     Salvar Backup da Escala em Excel (.xls)
                   </h3>
                   <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl leading-relaxed">
-                    Baixe e garanta a segurança das informações de marcações de respawns em uma planilha Excel completa (incluindo todos os dias, horários, personagens, ranks, party members e observações).
+                    Baixe e garanta a segurança das informações de marcações de respawns em uma planilha Excel completa.
                   </p>
                 </div>
               </div>
 
               <button
                 onClick={() => setIsExcelBackupOpen(true)}
-                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-md shadow-emerald-500/20 transition-all cursor-pointer whitespace-nowrap self-start md:self-auto shrink-0"
+                className="w-full md:w-auto inline-flex items-center justify-center gap-2 px-5 min-h-[44px] py-3 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-md shadow-emerald-500/20 transition-all cursor-pointer whitespace-nowrap shrink-0"
               >
                 <FileSpreadsheet className="h-4 w-4" />
                 <span>Salvar em Excel</span>
@@ -1236,18 +1121,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
 
           {/* Master Reset Box */}
-          <div className="rounded-2xl border border-rose-200/90 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20 p-6 shadow-sm">
+          <div className="rounded-2xl border border-rose-200/90 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20 p-4 sm:p-6 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-start gap-3.5">
                 <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-600 text-white shadow-md shadow-rose-500/25 shrink-0">
                   <RotateCcw className="h-5 w-5" />
                 </span>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
                     Reiniciar Escala & Liberar Todos os Respawns
                   </h3>
                   <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl leading-relaxed">
-                    Ideal para o início de novos finais de semana ou encerramento de eventos. Você pode zerar a grade inteira ou apenas o dia que desejar. Todos os slots voltam imediatamente para o status <strong>Livre</strong>.
+                    Ideal para o início de novos finais de semana. Você pode zerar a grade inteira ou apenas o dia que desejar.
                   </p>
                 </div>
               </div>
@@ -1257,7 +1142,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   setResetModalDay('friday');
                   setIsResetModalOpen(true);
                 }}
-                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 transition-all cursor-pointer whitespace-nowrap self-start md:self-auto"
+                className="w-full md:w-auto inline-flex items-center justify-center gap-2 px-5 min-h-[44px] py-3 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 transition-all cursor-pointer whitespace-nowrap shrink-0"
               >
                 <RotateCcw className="h-4 w-4" />
                 <span>Reiniciar Respawns</span>
@@ -1266,32 +1151,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
 
           {/* Custom Respawns / Manual Hunts Management Card */}
-          <div className="rounded-2xl border border-slate-200/95 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
+          <div className="rounded-2xl border border-slate-200/95 bg-white p-4 sm:p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
                   Cadastrar Novos Locais de Respawn
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Adicione novos locais de hunts ou respawns que aparecerão imediatamente na grade de horários da guilda.
+                  Adicione novos locais de hunts ou respawns na grade de horários da guilda.
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handleAddHunt} className="flex flex-col sm:flex-row gap-3">
+            <form onSubmit={handleAddHunt} className="flex flex-col sm:flex-row gap-2.5 sm:gap-3">
               <input
                 type="text"
                 value={newHuntName}
                 onChange={e => setNewHuntName(e.target.value)}
-                placeholder="Nome do Respawn (Ex: Deeper Banuta, Nagas, etc.)"
+                placeholder="Nome do Respawn (Ex: Deeper Banuta, Nagas...)"
                 required
-                className="flex-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-white"
+                className="flex-1 min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-sm sm:text-xs text-slate-900 dark:text-white"
               />
 
               <select
                 value={newHuntType}
                 onChange={e => setNewHuntType(e.target.value as 'normal' | '3h')}
-                className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white"
+                className="min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm sm:text-xs font-semibold text-slate-900 dark:text-white"
               >
                 <option value="normal">Normal (2h)</option>
                 <option value="3h">Especial (3h)</option>
@@ -1300,7 +1185,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <button
                 type="submit"
                 disabled={addingHunt}
-                className="inline-flex items-center justify-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1.5 px-5 min-h-[44px] sm:min-h-0 py-2.5 sm:py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
               >
                 {addingHunt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 <span>Adicionar Nova Hunt</span>
@@ -1386,9 +1271,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
 
           {/* TibiaData Sync Section */}
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
                 Sincronização de Leveis e Vocações (API TibiaData)
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -1398,18 +1283,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <button
               onClick={handleSyncAllLevels}
               disabled={syncingLevels}
-              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/25 disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 min-h-[44px] py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/25 disabled:opacity-50 cursor-pointer whitespace-nowrap"
             >
               {syncingLevels ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              <span>Sincronizar Leveis de Todos Agora</span>
+              <span>Sincronizar Leveis Agora</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
             {guildDiagnostics.map(diag => (
               <div
                 key={diag.guildName}
-                className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors"
+                className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors"
               >
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex items-center gap-2">
@@ -1443,27 +1328,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
 
                 <div className="mt-4 space-y-2 text-xs">
-                  <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                    <span>Endpoint Oficial:</span>
+                  <div className="flex justify-between items-center gap-2 text-slate-600 dark:text-slate-300">
+                    <span className="shrink-0">Endpoint:</span>
                     <a
                       href={`https://api.tibiadata.com/v4/guild/${diag.guildName}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                      className="font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 truncate max-w-[200px] sm:max-w-none"
                     >
-                      api.tibiadata.com/v4/guild/{diag.guildName}
-                      <ExternalLink className="h-3 w-3" />
+                      <span className="truncate">api.tibiadata.com/v4/guild/{diag.guildName}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
                     </a>
                   </div>
                   <div className="flex justify-between text-slate-600 dark:text-slate-300">
                     <span>Membros Ativos Carregados:</span>
-                    <strong className="text-slate-900 dark:text-white font-bold">{diag.total} membros</strong>
+                    <strong className="text-slate-900 dark:text-white font-bold tabular-nums">{diag.total} membros</strong>
                   </div>
                 </div>
 
                 <button
                   onClick={checkGuilds}
-                  className="mt-4 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                  className="mt-4 w-full min-h-[42px] flex items-center justify-center gap-1.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   Atualizar Dados da Guilda
@@ -1474,10 +1359,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
 
       {/* Guild Highscores Summary Card */}
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shrink-0">
                 <Zap className="h-5 w-5" />
               </span>
               <div>
@@ -1494,7 +1379,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 type="button"
                 onClick={() => loadGuildHighscores(true)}
                 disabled={loadingGuildHs}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer disabled:opacity-50"
+                className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 min-h-[44px] sm:min-h-0 py-2.5 sm:py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
               >
                 {loadingGuildHs ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 <span>Atualizar Experiência dos Jogadores</span>
@@ -1514,33 +1399,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <span>Carregando experiência dos jogadores da guilda...</span>
               </div>
             ) : guildHighscoresData ? (
-              <div className="space-y-3">
-                {guildHighscoresData.xpDate && (
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1">
-                    <span>Data de referência (XP Ontem): <strong className="text-slate-700 dark:text-slate-200">{guildHighscoresData.xpDate}</strong></span>
-                    <span>
-                      {(Array.isArray(guildHighscoresData) ? guildHighscoresData : (guildHighscoresData.members || guildHighscoresData.players || guildHighscoresData.highscores || [])).length} jogadores carregados
-                    </span>
-                  </div>
-                )}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold text-slate-400">
-                        <th className="py-2.5 px-3">Jogador</th>
-                        <th className="py-2.5 px-3">Nível</th>
-                        <th className="py-2.5 px-3">Vocação</th>
-                        <th className="py-2.5 px-3 text-right">Experiência (Ontem)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
-                      {(() => {
-                        const players = Array.isArray(guildHighscoresData)
-                          ? guildHighscoresData
-                          : (guildHighscoresData.members || guildHighscoresData.players || guildHighscoresData.highscores || []);
+              (() => {
+                const players = Array.isArray(guildHighscoresData)
+                  ? guildHighscoresData
+                  : (guildHighscoresData.members || guildHighscoresData.players || guildHighscoresData.highscores || []);
 
-                        if (players.length === 0) {
+                return (
+                  <div className="space-y-3">
+                    {guildHighscoresData.xpDate && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400 px-1">
+                        <span>Data de referência (XP Ontem): <strong className="text-slate-700 dark:text-slate-200">{guildHighscoresData.xpDate}</strong></span>
+                        <span className="tabular-nums">
+                          {players.length} jogadores carregados
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Mobile XP Cards */}
+                    <div className="md:hidden space-y-2">
+                      {players.length === 0 ? (
+                        <div className="py-6 text-center text-xs text-slate-400">
+                          Nenhum jogador retornado pela API.
+                        </div>
+                      ) : (
+                        players.map((p: any, idx: number) => {
+                          const xpVal = p.yesterdayExp ?? p.expYesterday ?? 0;
                           return (
+                            <div
+                              key={idx}
+                              className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex items-center justify-between gap-2.5"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                                  {p.name || p.charName || `Jogador #${idx + 1}`}
+                                </p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
+                                  Lv {p.level || p.value || 'N/D'} • <span className="text-blue-600 dark:text-blue-400 font-semibold">{p.vocation || 'N/D'}</span>
+                                </p>
+                              </div>
+                              <span className="text-xs font-black font-mono text-emerald-600 dark:text-emerald-400 shrink-0 tabular-nums">
+                                {xpVal > 0 ? `${xpVal.toLocaleString('pt-BR')} XP` : (p.formattedXp || '0 XP')}
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Desktop Table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold text-slate-400">
+                            <th className="py-2.5 px-3">Jogador</th>
+                            <th className="py-2.5 px-3">Nível</th>
+                            <th className="py-2.5 px-3">Vocação</th>
+                            <th className="py-2.5 px-3 text-right">Experiência (Ontem)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
+                          {players.length === 0 ? (
                             <tr>
                               <td colSpan={4} className="py-6 text-center text-slate-400 font-sans">
                                 <pre className="p-3 text-[11px] text-left overflow-auto max-h-60 bg-slate-50 dark:bg-slate-800 rounded-xl">
@@ -1548,27 +1466,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 </pre>
                               </td>
                             </tr>
-                          );
-                        }
-
-                        return players.map((p: any, idx: number) => {
-                          const xpVal = p.yesterdayExp ?? p.expYesterday ?? 0;
-                          return (
-                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                              <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white font-sans">{p.name || p.charName || `Jogador #${idx+1}`}</td>
-                              <td className="py-2.5 px-3">{p.level || p.value || 'N/D'}</td>
-                              <td className="py-2.5 px-3 text-blue-600 dark:text-blue-400 font-sans">{p.vocation || 'N/D'}</td>
-                              <td className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 font-black">
-                                {xpVal > 0 ? `${xpVal.toLocaleString('pt-BR')} XP` : (p.formattedXp || '0 XP')}
-                              </td>
-                            </tr>
-                          );
-                        });
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                          ) : (
+                            players.map((p: any, idx: number) => {
+                              const xpVal = p.yesterdayExp ?? p.expYesterday ?? 0;
+                              return (
+                                <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                                  <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white font-sans">{p.name || p.charName || `Jogador #${idx+1}`}</td>
+                                  <td className="py-2.5 px-3 tabular-nums">{p.level || p.value || 'N/D'}</td>
+                                  <td className="py-2.5 px-3 text-blue-600 dark:text-blue-400 font-sans">{p.vocation || 'N/D'}</td>
+                                  <td className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 font-black tabular-nums">
+                                    {xpVal > 0 ? `${xpVal.toLocaleString('pt-BR')} XP` : (p.formattedXp || '0 XP')}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()
             ) : (
               <div className="py-8 text-center text-xs text-slate-400">
                 Clique em "Atualizar Experiência dos Jogadores" para carregar os dados da API.
@@ -1582,22 +1500,58 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* SUB-TAB: RELEASED RESPAWNS LIST                          */}
       {/* ======================================================== */}
       {activeSubTab === 'released' && (
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Lista de Jogadores que Liberaram Respawns durante a Double
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                Lista de Jogadores que Liberaram Respawns
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Histórico completo de horários liberados pelos membros para alocação antecipada.
               </p>
             </div>
-            <span className="px-3 py-1 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-xs font-bold">
+            <span className="self-start sm:self-auto px-3 py-1 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-xs font-bold whitespace-nowrap tabular-nums">
               {releasedRespawnsList.length} Liberação(ões)
             </span>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Cards */}
+          <div className="md:hidden space-y-2.5">
+            {releasedRespawnsList.map(item => (
+              <div
+                key={item.id}
+                className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-black text-slate-900 dark:text-white truncate">
+                    {item.charName}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/60 text-[10px] font-extrabold uppercase text-blue-700 dark:text-blue-300 shrink-0">
+                    {item.day === 'friday' ? 'Sexta' : item.day === 'saturday' ? 'Sábado' : 'Domingo'}
+                  </span>
+                </div>
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  {item.respawnName}
+                </p>
+                <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                    {item.timeSlot}
+                  </span>
+                  <span className="text-slate-400 font-mono text-[10px] tabular-nums">
+                    {new Date(item.releasedAt).toLocaleString('pt-BR')}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {releasedRespawnsList.length === 0 && (
+              <div className="p-8 text-center text-xs text-slate-400 italic">
+                Nenhum respawn foi liberado pelos jogadores até o momento.
+              </div>
+            )}
+          </div>
+
+          {/* Desktop Table */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
@@ -1620,10 +1574,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <td className="p-3 font-bold text-slate-800 dark:text-slate-200">
                       {item.respawnName}
                     </td>
-                    <td className="p-3 font-mono text-xs text-emerald-600 dark:text-emerald-400">
+                    <td className="p-3 font-mono text-xs text-emerald-600 dark:text-emerald-400 tabular-nums">
                       {item.timeSlot}
                     </td>
-                    <td className="p-3 text-right text-slate-400 font-mono text-[11px]">
+                    <td className="p-3 text-right text-slate-400 font-mono text-[11px] tabular-nums">
                       {new Date(item.releasedAt).toLocaleString('pt-BR')}
                     </td>
                   </tr>
@@ -1641,15 +1595,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
+      {/* ======================================================== */}
+      {/* SUB-TAB: BACKUP & RESTAURAÇÃO DOS RESPAWNS ESPECIAIS     */}
+      {/* ======================================================== */}
+      {activeSubTab === 'backup' && (
+        <SpecialBackupPanel
+          reservations={reservations}
+          customRespawns={customRespawns}
+          onToast={msg => {
+            setToastMessage(msg);
+            setTimeout(() => setToastMessage(null), 5000);
+          }}
+        />
+      )}
+
 
       {/* Edit User Modal */}
       {editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white p-5 sm:p-6 pb-safe shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-in slide-in-from-bottom duration-200">
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700 sm:hidden" />
             <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">
               Editar Vínculo do Membro
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 break-all">
               E-mail: <strong className="text-slate-800 dark:text-white">{editingUser.email}</strong>
             </p>
 
@@ -1663,7 +1632,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   value={editCharName}
                   onChange={e => setEditCharName(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-white font-bold"
+                  className="w-full min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 sm:py-2 text-sm sm:text-xs text-slate-900 dark:text-white font-bold"
                 />
               </div>
 
@@ -1674,7 +1643,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <select
                   value={editRank}
                   onChange={e => setEditRank(e.target.value as PriorityRank)}
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white"
+                  className="w-full min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5 sm:py-2 text-sm sm:text-xs font-semibold text-slate-900 dark:text-white"
                 >
                   {PRIORITY_RANKS.map(r => (
                     <option key={r} value={r}>
@@ -1684,31 +1653,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </select>
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex items-center gap-2.5 pt-1 min-h-[36px]">
                 <input
                   type="checkbox"
                   id="isAdminCheckbox"
                   checked={editIsAdmin}
                   onChange={e => setEditIsAdmin(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  className="h-5 w-5 sm:h-4 sm:w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <label htmlFor="isAdminCheckbox" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
                   Acesso Total de Administrador ao Major
                 </label>
               </div>
 
-              <div className="pt-3 flex justify-end gap-2">
+              <div className="pt-3 flex flex-col-reverse sm:flex-row justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setEditingUser(null)}
-                  className="px-4 py-2 rounded-xl border text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  className="w-full sm:w-auto px-4 min-h-[44px] sm:min-h-0 py-2.5 sm:py-2 rounded-xl border text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={savingUser}
-                  className="px-5 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
+                  className="w-full sm:w-auto px-5 min-h-[44px] sm:min-h-0 py-2.5 sm:py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
                 >
                   {savingUser ? 'Salvando...' : 'Salvar Alterações'}
                 </button>

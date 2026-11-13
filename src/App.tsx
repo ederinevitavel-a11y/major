@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Header } from './components/Header';
 import { StatsCards } from './components/StatsCards';
@@ -13,6 +13,9 @@ import {
   subscribeToReservations,
   getAllUserProfiles,
   subscribeToUserProfiles,
+  getAllMemberDirectory,
+  subscribeToMemberDirectory,
+  syncMemberDirectoryFromUsers,
   getSystemStatus,
   updateSystemStatus,
   updateUserProfile,
@@ -53,11 +56,13 @@ const MainDashboard: React.FC = () => {
   const [scheduleSearch, setScheduleSearch] = useState<string>('');
   const [isExportOpen, setIsExportOpen] = useState(false);
 
-  // Security: Only administrators are authorized to fetch the full user profiles directory.
-  // Regular members never receive other players' profiles or emails.
+  const hasSyncedDirectoryRef = useRef(false);
+
+  // Security: Only administrators fetch full /users profiles (which contain emails/PII).
+  // Regular members only read the PII-free /member_directory collection.
   const refreshUsers = async () => {
     try {
-      const list = await getAllUserProfiles();
+      const list = isAdmin ? await getAllUserProfiles() : await getAllMemberDirectory();
       setUsersList(list);
     } catch (err) {
       console.warn('Erro ao carregar lista de membros:', err);
@@ -65,21 +70,34 @@ const MainDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!currentUser || !isAuthorized) {
+    if (loading || !currentUser || !isAuthorized) {
       setUsersList([]);
       setCustomRespawns([]);
       setReleasedRespawns([]);
       setLfgPosts([]);
+      hasSyncedDirectoryRef.current = false;
       return;
     }
 
-    // Real-time subscription to user profiles for all signed-in users (for party sharing)
-    const unsubUsers = subscribeToUserProfiles(
-      list => {
-        setUsersList(list);
-      },
-      err => console.warn('Erro ao sincronizar membros:', err)
-    );
+    // Real-time subscription: Admins read /users and keep /member_directory synced;
+    // Regular members read strictly from PII-free /member_directory.
+    const unsubUsers = isAdmin
+      ? subscribeToUserProfiles(
+          list => {
+            setUsersList(list);
+            if (!hasSyncedDirectoryRef.current && list.length > 0) {
+              hasSyncedDirectoryRef.current = true;
+              syncMemberDirectoryFromUsers(list).catch(() => {});
+            }
+          },
+          err => console.warn('Erro ao sincronizar membros:', err)
+        )
+      : subscribeToMemberDirectory(
+          list => {
+            setUsersList(list);
+          },
+          err => console.warn('Erro ao sincronizar diretório de membros:', err)
+        );
 
     // Real-time subscription to custom respawns
     const unsubCustom = subscribeToCustomRespawns(
@@ -105,11 +123,11 @@ const MainDashboard: React.FC = () => {
       unsubReleased();
       unsubLfg();
     };
-  }, [currentUser, isAuthorized]);
+  }, [loading, currentUser, isAuthorized, isAdmin]);
 
-  // Automated daily 07:00 AM sync & XP capture check
+  // Automated daily 07:00 AM sync & XP capture check (Strictly Admin-only)
   useEffect(() => {
-    if (!currentUser || !isAuthorized) return;
+    if (loading || !currentUser || !isAuthorized || !isAdmin) return;
 
     const runDailyAutoSync = async () => {
       try {
@@ -202,11 +220,11 @@ const MainDashboard: React.FC = () => {
     };
 
     runDailyAutoSync();
-  }, [currentUser, isAuthorized]);
+  }, [loading, currentUser, isAuthorized, isAdmin]);
 
   // Subscribe to real-time reservations with zero-knowledge data privacy
   useEffect(() => {
-    if (!currentUser || !isAuthorized) return;
+    if (loading || !currentUser || !isAuthorized) return;
 
     // If administrator, run sanitation check to ensure any legacy reservations have their sensitive fields isolated
     if (isAdmin) {
@@ -223,33 +241,65 @@ const MainDashboard: React.FC = () => {
       }
     );
     return () => unsub();
-  }, [currentUser, isAuthorized, isAdmin]);
+  }, [loading, currentUser, isAuthorized, isAdmin]);
 
-  // Dynamically link reservations (especially fixed special schedule slots) to registered user accounts by character name
+  // Dynamically link reservations (especially fixed special schedule slots) to registered user accounts by character name,
+  // while masking fixed-slot third-party details for non-admin members unless owned/shared/public.
   const linkedReservations = useMemo(() => {
-    if (!usersList || usersList.length === 0) return reservations;
     const userByCharName = new Map<string, UserProfile>();
-    usersList.forEach(u => {
+    (usersList || []).forEach(u => {
       if (u.charName) {
         userByCharName.set(u.charName.trim().toLowerCase(), u);
       }
     });
+
+    const myUid = currentUser?.uid || '';
+    const myCleanChar = userProfile?.charName ? userProfile.charName.trim().toLowerCase() : '';
+    const myCanonicalChar = userProfile?.charName ? getCanonicalPlayerName(userProfile.charName).toLowerCase() : '';
 
     return reservations.map(r => {
       if (!r.charName) return r;
       const cleanName = r.charName.trim().toLowerCase();
       const canonicalName = getCanonicalPlayerName(r.charName).toLowerCase();
       const matched = userByCharName.get(cleanName) || userByCharName.get(canonicalName);
+
+      const resolvedUserUid = matched ? matched.uid : r.userUid;
+      const resolvedRank = matched?.rank || r.userRank;
+
+      if (!isAdmin) {
+        const isOwn =
+          (Boolean(myUid) && (resolvedUserUid === myUid || r.userUid === myUid)) ||
+          (Boolean(myCleanChar) && (cleanName === myCleanChar || canonicalName === myCanonicalChar));
+        const isPartyMember = Boolean(myUid && r.partyMemberUids?.includes(myUid));
+        const ownerSharesWithMe = Boolean(
+          myUid &&
+          matched?.sharedWith &&
+          (matched.sharedWith.includes(myUid) || matched.sharedWith.includes('all'))
+        );
+        const isPublic = Boolean(r.isPublicVisibility);
+
+        if (!isOwn && !isPartyMember && !ownerSharesWithMe && !isPublic) {
+          return {
+            ...r,
+            userUid: resolvedUserUid,
+            charName: '',
+            userRank: undefined,
+            partyMembers: undefined,
+            notes: undefined,
+          };
+        }
+      }
+
       if (matched) {
         return {
           ...r,
           userUid: matched.uid,
-          userRank: matched.rank || r.userRank,
+          userRank: resolvedRank,
         };
       }
       return r;
     });
-  }, [reservations, usersList]);
+  }, [reservations, usersList, isAdmin, currentUser?.uid, userProfile?.charName]);
 
   // Loading state
   if (loading) {
@@ -289,7 +339,7 @@ const MainDashboard: React.FC = () => {
         <div className="flex-1" />
 
         {/* Bottom Area: Perfectly aligned bottom-left card and bottom-right copyright */}
-        <footer className="relative z-10 w-full max-w-[1600px] mx-auto px-4 sm:px-8 pb-6 sm:pb-8 pt-4 flex flex-col sm:flex-row sm:items-end justify-between gap-4 pointer-events-none">
+        <footer className="relative z-10 w-full max-w-[1600px] mx-auto px-4 sm:px-8 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:pb-8 pt-4 flex flex-col sm:flex-row sm:items-end justify-between gap-3 sm:gap-4 pointer-events-none">
           {/* Card no Canto Inferior Esquerdo */}
           <div className="pointer-events-auto w-full sm:w-auto inline-flex flex-col items-start gap-3.5 p-4 sm:p-5 rounded-3xl bg-black/85 backdrop-blur-xl border border-white/15 shadow-2xl shadow-black/90 max-w-full sm:max-w-xs md:max-w-sm">
             {/* Logo & Title */}
@@ -314,9 +364,9 @@ const MainDashboard: React.FC = () => {
             {/* Google Login Button */}
             <button
               onClick={() => signInWithGoogle()}
-              className="w-full flex items-center justify-center gap-2.5 px-4 sm:px-5 py-3 rounded-2xl bg-[#2160FF] hover:bg-blue-600 active:scale-[0.98] text-white font-bold text-xs sm:text-sm shadow-xl shadow-blue-500/35 border border-blue-400/30 hover:scale-[1.02] transition-all cursor-pointer whitespace-nowrap"
+              className="w-full min-h-[48px] flex items-center justify-center gap-2.5 px-4 sm:px-5 py-3 rounded-2xl bg-[#2160FF] hover:bg-blue-600 active:scale-[0.98] text-white font-bold text-sm shadow-xl shadow-blue-500/35 border border-blue-400/30 hover:scale-[1.02] transition-all cursor-pointer whitespace-nowrap"
             >
-              <svg className="h-4 w-4 sm:h-4.5 sm:w-4.5 shrink-0" viewBox="0 0 24 24">
+              <svg className="h-4.5 w-4.5 shrink-0" viewBox="0 0 24 24">
                 <path
                   fill="currentColor"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -335,12 +385,12 @@ const MainDashboard: React.FC = () => {
                 />
               </svg>
               <span>Entrar com o Google</span>
-              <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+              <ArrowRight className="h-4 w-4 shrink-0" />
             </button>
           </div>
 
           {/* Minimal Copyright Pill on bottom-right */}
-          <div className="pointer-events-auto self-center sm:self-end px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/10 text-[11px] sm:text-xs text-slate-300 shadow-xl select-none whitespace-nowrap text-center">
+          <div className="pointer-events-auto self-center sm:self-end max-w-full px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/10 text-[11px] sm:text-xs text-slate-300 shadow-xl select-none sm:whitespace-nowrap text-center">
             Major © 2026 • Todos os direitos reservados para Major
           </div>
         </footer>
@@ -413,7 +463,7 @@ const MainDashboard: React.FC = () => {
         lfgCount={lfgPosts.length}
       />
 
-      <main className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5 overflow-x-hidden">
+      <main className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-3.5 sm:py-6 space-y-4 sm:space-y-5 overflow-x-hidden">
         {/* KPI Stats overview */}
         <StatsCards
           reservations={linkedReservations}
@@ -475,7 +525,7 @@ const MainDashboard: React.FC = () => {
       </main>
 
       {/* Footer */}
-      <footer className="max-w-7xl mx-auto w-full px-6 py-6 text-center text-xs text-slate-400 border-t border-slate-200 dark:border-slate-800">
+      <footer className="max-w-7xl mx-auto w-full px-4 sm:px-6 pt-5 pb-24 md:py-6 text-center text-xs text-slate-400 border-t border-slate-200 dark:border-slate-800">
         Major © 2026 • Todos os direitos reservados para Major
       </footer>
 

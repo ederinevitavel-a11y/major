@@ -7,26 +7,62 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Helper functions
+    // ---- GLOBAL SECURITY HELPERS ----
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null &&
+        request.auth.token.email != null &&
+        request.auth.token.email_verified == true;
+    }
+
+    function encodedEmail() {
+      return request.auth.token.email.lower().replace('@', '%40').replace('\\+', '%2B');
     }
 
     function isBootstrappedAdmin() {
       return isSignedIn() &&
-        (request.auth.token.email == 'ederinevitavel@gmail.com' || request.auth.token.email == 'admissclick@gmail.com') &&
-        request.auth.token.email_verified == true;
+        (request.auth.token.email.lower() == 'ederinevitavel@gmail.com' ||
+         request.auth.token.email.lower() == 'admissclick@gmail.com');
+    }
+
+    function isEmailInWhitelist() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/allowed_emails/$(encodedEmail())) ||
+        exists(/databases/$(database)/documents/allowed_emails/$(request.auth.token.email.lower()))
+      );
+    }
+
+    function isWhitelisted() {
+      return isBootstrappedAdmin() || isEmailInWhitelist();
+    }
+
+    function isEmailRoleAdmin() {
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/allowed_emails/$(encodedEmail())) &&
+         get(/databases/$(database)/documents/allowed_emails/$(encodedEmail())).data.role == 'admin') ||
+        (exists(/databases/$(database)/documents/allowed_emails/$(request.auth.token.email.lower())) &&
+         get(/databases/$(database)/documents/allowed_emails/$(request.auth.token.email.lower())).data.role == 'admin')
+      );
     }
 
     function isAdmin() {
       return isBootstrappedAdmin() ||
         (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))) ||
-        (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true) ||
-        (isSignedIn() && request.auth.token.email != null && exists(/databases/$(database)/documents/allowed_emails/$(request.auth.token.email.lower())) && get(/databases/$(database)/documents/allowed_emails/$(request.auth.token.email.lower())).data.role == 'admin');
+        isEmailRoleAdmin() ||
+        (isWhitelisted() &&
+         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true);
     }
 
     function isLeader() {
-      return isSignedIn() &&
+      return isWhitelisted() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rank == 'Leader';
     }
@@ -36,131 +72,406 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128;
+      return id is string &&
+        id.size() >= 1 &&
+        id.size() <= 128 &&
+        !id.matches('.*[/\\s].*');
     }
+
+    function isValidRank(rank) {
+      return rank in ['Leader', 'Challenger', 'Guardian', 'Loyal', 'Member', 'Beginner', 'Newcomer'];
+    }
+
+    function isValidDay(day) {
+      return day in ['friday', 'saturday', 'sunday'];
+    }
+
+    function isValidSlotType(slotType) {
+      return slotType in ['normal', '3h', 'planilhados'];
+    }
+
+    // ---- SCHEMA VALIDATION BLUEPRINTS ----
+    function isValidAllowedEmail(data) {
+      return data.keys().hasAll(['email', 'role', 'addedBy', 'createdAt']) &&
+        data.keys().hasOnly(['email', 'role', 'addedBy', 'note', 'createdAt']) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        data.role in ['admin', 'member'] &&
+        data.addedBy is string && data.addedBy.size() <= 120 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 200));
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'charName', 'guildName', 'rank', 'vocation', 'level', 'isAdmin']) &&
+        data.keys().hasOnly([
+          'uid', 'email', 'charName', 'guildName', 'rank', 'vocation', 'level',
+          'isAdmin', 'sharedWith', 'trackedXpUids', 'isOnline', 'lastSeen',
+          'lastSeenAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.uid == userId &&
+        data.email is string && data.email.size() <= 120 &&
+        data.charName is string && data.charName.size() >= 1 && data.charName.size() <= 60 &&
+        data.guildName is string && data.guildName.size() >= 1 && data.guildName.size() <= 60 &&
+        isValidRank(data.rank) &&
+        data.vocation is string && data.vocation.size() <= 50 &&
+        data.level is number && data.level >= 0 && data.level <= 10000 &&
+        data.isAdmin is bool &&
+        (!('sharedWith' in data) || (data.sharedWith is list && data.sharedWith.size() <= 100)) &&
+        (!('trackedXpUids' in data) || (data.trackedXpUids is list && data.trackedXpUids.size() <= 50)) &&
+        (!('isOnline' in data) || data.isOnline is bool) &&
+        (!('lastSeen' in data) || (data.lastSeen is string && data.lastSeen.size() <= 64)) &&
+        (!('lastSeenAt' in data) || data.lastSeenAt is number) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidMemberDirectory(data, userId) {
+      return data.keys().hasAll(['uid', 'charName', 'guildName', 'rank']) &&
+        data.keys().hasOnly([
+          'uid', 'charName', 'guildName', 'rank', 'vocation', 'level', 'sharedWith', 'updatedAt'
+        ]) &&
+        data.uid == userId &&
+        data.charName is string && data.charName.size() >= 1 && data.charName.size() <= 60 &&
+        data.guildName is string && data.guildName.size() >= 1 && data.guildName.size() <= 60 &&
+        isValidRank(data.rank) &&
+        (!('vocation' in data) || (data.vocation is string && data.vocation.size() <= 50)) &&
+        (!('level' in data) || (data.level is number && data.level >= 0 && data.level <= 10000)) &&
+        (!('sharedWith' in data) || (data.sharedWith is list && data.sharedWith.size() <= 100)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidReservationSlot(data, reservationId) {
+      return data.keys().hasAll(['id', 'day', 'slotType', 'timeSlot', 'respawnName', 'userUid']) &&
+        data.keys().hasOnly([
+          'id', 'day', 'slotType', 'timeSlot', 'respawnName', 'userUid',
+          'isOccupied', 'isPublicVisibility', 'partyMemberUids', 'reservedAt',
+          'releasedRespawnId'
+        ]) &&
+        data.id == reservationId &&
+        isValidDay(data.day) &&
+        isValidSlotType(data.slotType) &&
+        data.timeSlot is string && data.timeSlot.size() >= 1 && data.timeSlot.size() <= 40 &&
+        data.respawnName is string && data.respawnName.size() >= 1 && data.respawnName.size() <= 80 &&
+        data.userUid is string && data.userUid.size() >= 1 && data.userUid.size() <= 128 &&
+        (!('isOccupied' in data) || data.isOccupied is bool) &&
+        (!('isPublicVisibility' in data) || data.isPublicVisibility is bool) &&
+        (!('partyMemberUids' in data) || (data.partyMemberUids is list && data.partyMemberUids.size() <= 20)) &&
+        (!('reservedAt' in data) || (data.reservedAt is string && data.reservedAt.size() <= 64)) &&
+        (!('releasedRespawnId' in data) || (data.releasedRespawnId is string && isValidId(data.releasedRespawnId)));
+    }
+
+    function isValidReservationDetails(data, reservationId) {
+      return data.keys().hasAll(['id', 'charName', 'userUid']) &&
+        data.keys().hasOnly([
+          'id', 'charName', 'userUid', 'userRank', 'partyMembers', 'partyMemberUids',
+          'sharedViewerUids', 'isPublicVisibility', 'notes', 'createdAt', 'updatedAt', 'releasedRespawnId'
+        ]) &&
+        data.id == reservationId &&
+        data.charName is string && data.charName.size() <= 60 &&
+        data.userUid is string && data.userUid.size() >= 1 && data.userUid.size() <= 128 &&
+        (!('userRank' in data) || (data.userRank is string && data.userRank.size() <= 30)) &&
+        (!('partyMembers' in data) || (data.partyMembers is string && data.partyMembers.size() <= 300)) &&
+        (!('partyMemberUids' in data) || (data.partyMemberUids is list && data.partyMemberUids.size() <= 20)) &&
+        (!('sharedViewerUids' in data) || (data.sharedViewerUids is list && data.sharedViewerUids.size() <= 100)) &&
+        (!('isPublicVisibility' in data) || data.isPublicVisibility is bool) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 240)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64)) &&
+        (!('releasedRespawnId' in data) || (data.releasedRespawnId is string && isValidId(data.releasedRespawnId)));
+    }
+
+    function isValidReleasedRespawn(data, releasedId) {
+      return data.keys().hasAll(['id', 'respawnName', 'timeSlot', 'day', 'slotType', 'charName', 'userUid', 'releasedAt']) &&
+        data.keys().hasOnly([
+          'id', 'respawnName', 'timeSlot', 'day', 'slotType', 'charName',
+          'userUid', 'releasedAt', 'claimReservationId'
+        ]) &&
+        data.id == releasedId &&
+        data.respawnName is string && data.respawnName.size() >= 1 && data.respawnName.size() <= 80 &&
+        data.timeSlot is string && data.timeSlot.size() >= 1 && data.timeSlot.size() <= 40 &&
+        isValidDay(data.day) &&
+        isValidSlotType(data.slotType) &&
+        data.charName is string && data.charName.size() >= 1 && data.charName.size() <= 60 &&
+        data.userUid is string && data.userUid.size() >= 1 && data.userUid.size() <= 128 &&
+        data.releasedAt is string && data.releasedAt.size() <= 64 &&
+        (!('claimReservationId' in data) || (data.claimReservationId is string && isValidId(data.claimReservationId)));
+    }
+
+    function isValidLfgPost(data, postId) {
+      return data.keys().hasAll(['id', 'userUid', 'charName', 'level', 'vocation', 'phone', 'days', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'userUid', 'charName', 'level', 'vocation', 'phone', 'days',
+          'timeSlots', 'notes', 'rank', 'createdAt', 'updatedAt'
+        ]) &&
+        data.id == postId &&
+        data.userUid is string && data.userUid.size() >= 1 && data.userUid.size() <= 128 &&
+        data.charName is string && data.charName.size() >= 1 && data.charName.size() <= 60 &&
+        data.level is number && data.level >= 1 && data.level <= 10000 &&
+        data.vocation is string && data.vocation.size() >= 1 && data.vocation.size() <= 40 &&
+        data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 30 &&
+        data.days is list && data.days.size() >= 1 && data.days.size() <= 3 &&
+        data.days.hasOnly(['friday', 'saturday', 'sunday']) &&
+        (!('timeSlots' in data) || (data.timeSlots is string && data.timeSlots.size() <= 120)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 160)) &&
+        (!('rank' in data) || (data.rank is string && data.rank.size() <= 30)) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidDoubleXpRecord(data, recordId) {
+      return data.keys().hasAll(['uid', 'charName', 'totalExp']) &&
+        data.keys().hasOnly([
+          'uid', 'charName', 'fridayExp', 'saturdayExp', 'sundayExp',
+          'totalExp', 'fridayDate', 'saturdayDate', 'sundayDate',
+          'targetExp', 'startExp', 'lastCapturedAt'
+        ]) &&
+        data.uid == recordId &&
+        data.charName is string && data.charName.size() <= 60 &&
+        data.totalExp is number && data.totalExp >= 0 &&
+        (!('fridayExp' in data) || (data.fridayExp is number && data.fridayExp >= 0)) &&
+        (!('saturdayExp' in data) || (data.saturdayExp is number && data.saturdayExp >= 0)) &&
+        (!('sundayExp' in data) || (data.sundayExp is number && data.sundayExp >= 0)) &&
+        (!('targetExp' in data) || (data.targetExp is number && data.targetExp >= 0)) &&
+        (!('startExp' in data) || (data.startExp is number && data.startExp >= 0)) &&
+        (!('fridayDate' in data) || (data.fridayDate is string && data.fridayDate.size() <= 64)) &&
+        (!('saturdayDate' in data) || (data.saturdayDate is string && data.saturdayDate.size() <= 64)) &&
+        (!('sundayDate' in data) || (data.sundayDate is string && data.sundayDate.size() <= 64)) &&
+        (!('lastCapturedAt' in data) || (data.lastCapturedAt is string && data.lastCapturedAt.size() <= 64));
+    }
+
+    function isValidAtomicClaim(resData) {
+      return resData.userUid == request.auth.uid &&
+        'releasedRespawnId' in resData &&
+        resData.releasedRespawnId is string &&
+        isValidId(resData.releasedRespawnId) &&
+        exists(/databases/$(database)/documents/released_respawns/$(resData.releasedRespawnId)) &&
+        !existsAfter(/databases/$(database)/documents/released_respawns/$(resData.releasedRespawnId)) &&
+        get(/databases/$(database)/documents/released_respawns/$(resData.releasedRespawnId)).data.day == resData.day &&
+        get(/databases/$(database)/documents/released_respawns/$(resData.releasedRespawnId)).data.respawnName == resData.respawnName &&
+        get(/databases/$(database)/documents/released_respawns/$(resData.releasedRespawnId)).data.timeSlot == resData.timeSlot;
+    }
+
+    function isValidAtomicDetailClaim(detailData) {
+      return detailData.userUid == request.auth.uid &&
+        'releasedRespawnId' in detailData &&
+        detailData.releasedRespawnId is string &&
+        isValidId(detailData.releasedRespawnId) &&
+        exists(/databases/$(database)/documents/released_respawns/$(detailData.releasedRespawnId)) &&
+        !existsAfter(/databases/$(database)/documents/released_respawns/$(detailData.releasedRespawnId)) &&
+        existsAfter(/databases/$(database)/documents/reservations/$(detailData.id)) &&
+        getAfter(/databases/$(database)/documents/reservations/$(detailData.id)).data.userUid == request.auth.uid;
+    }
+
+    // ---- COLLECTION RULES ----
 
     // Admins registry
     match /admins/{adminId} {
-      allow read: if isSignedIn();
+      allow get: if isWhitelisted() && isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if isAdmin();
       allow write: if isAdmin() && isValidId(adminId);
     }
 
     // Whitelisted emails - ZERO PII EXPOSURE
     // Only administrators can list the authorized email directory.
-    // Regular members can ONLY inspect their own exact email document to verify status.
+    // Verified users can ONLY inspect their own exact email document to verify status.
     match /allowed_emails/{emailId} {
       allow get: if isAdmin() || (
         isSignedIn() &&
-        request.auth.token.email != null &&
+        isValidId(emailId) &&
+        resource != null &&
         resource.data.email != null &&
         request.auth.token.email.lower() == resource.data.email.lower()
       );
       allow list: if isAdmin();
-      allow write: if isAdmin() && isValidId(emailId);
+      allow create, update: if isAdmin() && isValidId(emailId) && isValidAllowedEmail(incoming());
+      allow delete: if isAdmin() && isValidId(emailId);
     }
 
-    // User profiles - Allow signed-in users to read/list profiles for party selection
+    // Private User Profiles (contains PII email - strictly owner or admin ONLY)
     match /users/{userId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn() &&
+      allow get: if isWhitelisted() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isWhitelisted() &&
         isValidId(userId) &&
-        (request.auth.uid == userId || isAdmin()) &&
-        (request.resource.data.isAdmin == false || isBootstrappedAdmin() || isAdmin());
-      allow update: if isSignedIn() &&
+        isValidUserProfile(incoming(), userId) &&
+        (isAdmin() || (
+          isOwner(userId) &&
+          incoming().isAdmin == false &&
+          incoming().email.lower() == request.auth.token.email.lower()
+        ));
+      allow update: if isWhitelisted() &&
         isValidId(userId) &&
-        (isAdmin() || (request.auth.uid == userId && (request.resource.data.isAdmin == resource.data.isAdmin)));
-      allow delete: if isAdmin();
+        isValidUserProfile(incoming(), userId) &&
+        (isAdmin() || (
+          isOwner(userId) &&
+          incoming().uid == existing().uid &&
+          incoming().email == existing().email &&
+          incoming().isAdmin == existing().isAdmin &&
+          incoming().rank == existing().rank &&
+          incoming().charName == existing().charName &&
+          incoming().guildName == existing().guildName &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'sharedWith', 'trackedXpUids', 'isOnline', 'lastSeen', 'lastSeenAt', 'updatedAt'
+          ])
+        ));
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // PII-free Member Directory for whitelisted guild members (no email, no isAdmin)
+    match /member_directory/{userId} {
+      allow get, list: if isWhitelisted();
+      allow create: if isWhitelisted() &&
+        isValidId(userId) &&
+        isValidMemberDirectory(incoming(), userId) &&
+        (isAdmin() || (
+          isOwner(userId) &&
+          (!exists(/databases/$(database)/documents/users/$(userId)) || (
+            incoming().charName == get(/databases/$(database)/documents/users/$(userId)).data.charName &&
+            incoming().rank == get(/databases/$(database)/documents/users/$(userId)).data.rank
+          ))
+        ));
+      allow update: if isWhitelisted() &&
+        isValidId(userId) &&
+        isValidMemberDirectory(incoming(), userId) &&
+        (isAdmin() || (
+          isOwner(userId) &&
+          incoming().uid == existing().uid &&
+          incoming().charName == existing().charName &&
+          incoming().guildName == existing().guildName &&
+          incoming().rank == existing().rank &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['sharedWith', 'updatedAt'])
+        ));
+      allow delete: if isAdmin() && isValidId(userId);
     }
 
     // Respawns & Schedule Public Slots - Zero PII / Anonymized Occupancy
-    // Public schedule for signed in guild members containing only slot occupation status.
-    // Restriction: Only Admin or players with Leader rank can create or choose respawns.
     match /reservations/{reservationId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() &&
+      allow read: if isWhitelisted();
+      allow create: if isWhitelisted() &&
         isValidId(reservationId) &&
-        (isAdmin() || (isLeader() && request.resource.data.userUid == request.auth.uid));
-      allow update: if isSignedIn() &&
+        isValidReservationSlot(incoming(), reservationId) &&
+        (isAdmin() ||
+         (isLeader() && incoming().userUid == request.auth.uid) ||
+         isValidAtomicClaim(incoming()));
+      allow update: if isWhitelisted() &&
         isValidId(reservationId) &&
-        (isAdmin() || (isLeader() && resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid));
-      allow delete: if isSignedIn() && (
-        isAdmin() || 
-        resource == null || 
-        resource.data.userUid == request.auth.uid ||
-        (exists(/databases/$(database)/documents/reservation_details/$(reservationId)) && 
-         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/reservation_details/$(reservationId)).data.charName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.charName)
-      );
+        isValidReservationSlot(incoming(), reservationId) &&
+        (isAdmin() ||
+         (isLeader() && existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid) ||
+         (isOwner(existing().userUid) && incoming().diff(existing()).affectedKeys().hasOnly(['isPublicVisibility'])));
+      allow delete: if isWhitelisted() &&
+        isValidId(reservationId) &&
+        resource != null &&
+        (isAdmin() || existing().userUid == request.auth.uid);
     }
 
     // Sensitive Reservation Details (Character Name, Party Members, Notes)
-    // STRICT ZERO-KNOWLEDGE BOUNDARY:
-    // Members can read own reservation details or records shared via sharedWith array in user profile.
     match /reservation_details/{reservationId} {
-      allow get, list: if isSignedIn() && (
-        isAdmin() || 
-        resource.data.userUid == request.auth.uid ||
-        (exists(/databases/$(database)/documents/users/$(resource.data.userUid)) && 
-         request.auth.uid in get(/databases/$(database)/documents/users/$(resource.data.userUid)).data.get('sharedWith', []))
+      allow get, list: if isWhitelisted() && (
+        isAdmin() ||
+        existing().userUid == request.auth.uid ||
+        existing().isPublicVisibility == true ||
+        request.auth.uid in existing().partyMemberUids ||
+        request.auth.uid in existing().sharedViewerUids ||
+        'all' in existing().sharedViewerUids
       );
-      allow create: if isSignedIn() &&
+      allow create: if isWhitelisted() &&
         isValidId(reservationId) &&
-        (isAdmin() || (isLeader() && request.resource.data.userUid == request.auth.uid));
-      allow update: if isSignedIn() &&
+        isValidReservationDetails(incoming(), reservationId) &&
+        (isAdmin() ||
+         (isLeader() && incoming().userUid == request.auth.uid) ||
+         isValidAtomicDetailClaim(incoming()));
+      allow update: if isWhitelisted() &&
         isValidId(reservationId) &&
-        (isAdmin() || (isLeader() && resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid));
-      allow delete: if isSignedIn() && (
-        isAdmin() || 
-        resource == null || 
-        resource.data.userUid == request.auth.uid ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         resource.data.charName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.charName)
-      );
+        isValidReservationDetails(incoming(), reservationId) &&
+        (isAdmin() ||
+         (isLeader() && existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid) ||
+         (isOwner(existing().userUid) && incoming().diff(existing()).affectedKeys().hasOnly([
+           'isPublicVisibility', 'partyMembers', 'partyMemberUids', 'sharedViewerUids', 'notes', 'updatedAt'
+         ])));
+      allow delete: if isWhitelisted() &&
+        isValidId(reservationId) &&
+        resource != null &&
+        (isAdmin() || existing().userUid == request.auth.uid);
     }
 
     // Global Settings (e.g. double_xp, system_status)
     match /settings/{settingId} {
-      allow read: if isSignedIn();
+      allow read: if isWhitelisted();
       allow write: if isAdmin() && isValidId(settingId);
     }
 
     // Double XP Records
     match /double_xp_records/{recordId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && (isAdmin() || request.auth.uid == recordId);
+      allow read: if isWhitelisted();
+      allow create, update: if isWhitelisted() &&
+        isValidId(recordId) &&
+        isValidDoubleXpRecord(incoming(), recordId) &&
+        (isAdmin() || request.auth.uid == recordId);
+      allow delete: if isAdmin() && isValidId(recordId);
     }
 
-    // Global Guild Settings & Public non-PII Statistics
+    // Global Guild Settings
     match /guild_settings/{settingId} {
-      allow read: if isSignedIn();
+      allow read: if isWhitelisted();
       allow write: if isAdmin() && isValidId(settingId);
     }
 
     // Custom Respawns (Manual Hunts added by Admin)
     match /custom_respawns/{respawnId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() && isValidId(respawnId);
+      allow read: if isWhitelisted();
+      allow create, update: if isAdmin() &&
+        isValidId(respawnId) &&
+        incoming().keys().hasAll(['name', 'type', 'addedBy', 'createdAt']) &&
+        incoming().keys().hasOnly(['name', 'type', 'addedBy', 'createdAt']) &&
+        incoming().name is string && incoming().name.size() >= 1 && incoming().name.size() <= 80 &&
+        incoming().type in ['normal', '3h'];
+      allow delete: if isAdmin() && isValidId(respawnId);
     }
 
-    // Released Respawns - Respawns voluntarily freed up by players so others can claim them early
+    // Released Respawns - Freed up by owner/leader/admin and claimed atomically
     match /released_respawns/{releasedId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(releasedId);
-      allow update: if isAdmin();
-      allow delete: if isSignedIn();
+      allow read: if isWhitelisted();
+      allow create: if isWhitelisted() &&
+        isValidId(releasedId) &&
+        isValidReleasedRespawn(incoming(), releasedId) &&
+        (isAdmin() || incoming().userUid == request.auth.uid);
+      allow update: if isAdmin() &&
+        isValidId(releasedId) &&
+        isValidReleasedRespawn(incoming(), releasedId);
+      allow delete: if isWhitelisted() &&
+        isValidId(releasedId) &&
+        resource != null &&
+        (isAdmin() ||
+         existing().userUid == request.auth.uid ||
+         ('claimReservationId' in existing() &&
+          existing().claimReservationId is string &&
+          isValidId(existing().claimReservationId) &&
+          existsAfter(/databases/$(database)/documents/reservations/$(existing().claimReservationId)) &&
+          getAfter(/databases/$(database)/documents/reservations/$(existing().claimReservationId)).data.userUid == request.auth.uid));
     }
 
-    // Quero Hunt! (LFG Posts - Players looking for party for double exp)
+    // Quero Hunt! (LFG Posts - Whitelisted guild members only)
     match /lfg_posts/{postId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() &&
+      allow read: if isWhitelisted();
+      allow create: if isWhitelisted() &&
         isValidId(postId) &&
-        (request.resource.data.userUid == request.auth.uid || isAdmin());
-      allow update: if isSignedIn() &&
+        isValidLfgPost(incoming(), postId) &&
+        (isAdmin() || (incoming().userUid == request.auth.uid && postId == request.auth.uid));
+      allow update: if isWhitelisted() &&
         isValidId(postId) &&
-        (resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid || isAdmin());
-      allow delete: if isSignedIn() &&
-        (resource.data.userUid == request.auth.uid || isAdmin());
+        isValidLfgPost(incoming(), postId) &&
+        (isAdmin() || (existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid));
+      allow delete: if isWhitelisted() &&
+        isValidId(postId) &&
+        resource != null &&
+        (isAdmin() || existing().userUid == request.auth.uid);
+    }
+
+    // Admin Backups of Special Respawns Configuration (Strictly Admin-only)
+    match /admin_backups/{backupId} {
+      allow list: if isAdmin();
+      allow get, create, update, delete: if isAdmin() && isValidId(backupId);
     }
   }
 }

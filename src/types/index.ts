@@ -29,6 +29,17 @@ export interface UserProfile {
   isOnline?: boolean;
 }
 
+export interface MemberDirectoryProfile {
+  uid: string;
+  charName: string;
+  guildName: string;
+  rank: PriorityRank;
+  vocation: string;
+  level: number;
+  sharedWith?: string[];
+  updatedAt?: string;
+}
+
 export interface AllowedEmail {
   id: string;
   email: string;
@@ -49,6 +60,7 @@ export interface ReservationSlot {
   isPublicVisibility?: boolean;
   partyMemberUids?: string[];
   reservedAt: string;
+  releasedRespawnId?: string;
 }
 
 export interface ReservationDetails {
@@ -58,10 +70,12 @@ export interface ReservationDetails {
   userRank: PriorityRank;
   partyMembers?: string;
   partyMemberUids?: string[];
+  sharedViewerUids?: string[];
   isPublicVisibility?: boolean;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
+  releasedRespawnId?: string;
 }
 
 export interface Reservation extends ReservationSlot {
@@ -69,8 +83,10 @@ export interface Reservation extends ReservationSlot {
   userRank?: PriorityRank;
   partyMembers?: string;
   partyMemberUids?: string[];
+  sharedViewerUids?: string[];
   notes?: string;
   exactTime?: string;
+  releasedRespawnId?: string;
 }
 
 export interface TibiaGuildMember {
@@ -139,6 +155,7 @@ export interface ReleasedRespawn {
   charName: string;
   userUid: string;
   releasedAt: string;
+  claimReservationId?: string;
 }
 
 export interface LfgPost {
@@ -154,6 +171,21 @@ export interface LfgPost {
   rank?: PriorityRank;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface SpecialRespawnsBackup {
+  id: string;
+  name: string;
+  createdAt: string;
+  createdBy: string;
+  specialCount: number;
+  respawnsCount: number;
+  reservations: Reservation[];
+  slotsConfig?: {
+    baseSlotsMap: Record<string, string[]>;
+    slotsByDay?: Partial<Record<string, Partial<Record<HuntDay, string[]>>>>;
+    customSpecialRespawns?: CustomRespawn[];
+  };
 }
 
 export type MainTab = 'schedule' | 'lfg' | 'released' | 'my-schedule' | 'members' | 'settings';

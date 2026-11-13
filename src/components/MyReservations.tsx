@@ -375,69 +375,69 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
       )}
 
       {/* Streamlined Header & Quick Actions Bar */}
-      <div className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-7 shadow-sm dark:border-slate-800 dark:bg-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-5">
+      <div className="rounded-3xl border border-slate-200/90 bg-white p-4 sm:p-7 shadow-sm dark:border-slate-800 dark:bg-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-5">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase tracking-wider">
               Missclick
             </span>
-            <span className="text-xs text-slate-400 font-mono">• {userProfile?.charName || 'Personagem'}</span>
+            <span className="text-xs text-slate-400 font-mono truncate">• {userProfile?.charName || 'Personagem'}</span>
           </div>
-          <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+          <h2 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white">
             Painel de Controle
           </h2>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
+        <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 shrink-0 w-full md:w-auto">
           <button
             type="button"
             onClick={() => {
               setTrackSearchQuery('');
               setIsAddTrackOpen(true);
             }}
-            className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-500/25 transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-500/25 transition-all cursor-pointer whitespace-nowrap"
           >
-            <UserCheck className="h-4 w-4" />
+            <UserCheck className="h-4 w-4 shrink-0" />
             <span>Incluir Jogadores (XP)</span>
           </button>
           <button
             type="button"
             onClick={() => setIsPartyManageOpen(true)}
-            className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-[#2160FF] hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/25 transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-2xl bg-[#2160FF] hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/25 transition-all cursor-pointer whitespace-nowrap"
             title="Liberar visibilidade dos seus respawns para outros membros ou para toda a guilda"
           >
-            <Eye className="h-4 w-4" />
-            <span>Dê visibilidade ({isSharedWithAll ? 'Toda Guilda' : `${selectedPartyMembers.length} membro(s)`})</span>
+            <Eye className="h-4 w-4 shrink-0" />
+            <span className="truncate">Dê visibilidade ({isSharedWithAll ? 'Toda Guilda' : `${selectedPartyMembers.length}`})</span>
           </button>
         </div>
       </div>
 
       {/* Automatic Character Experience Card (No day cards) */}
-      <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <div className="h-12 w-12 rounded-2xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold shadow-sm">
-            <Award className="h-6 w-6" />
+      <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
+        <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
+          <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-2xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold shadow-sm shrink-0">
+            <Award className="h-5 w-5 sm:h-6 sm:w-6" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="text-[10px] uppercase font-black tracking-wider text-slate-400">Personagem Vinculado</div>
-            <div className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2 mt-0.5">
-              <span>{charInfo?.name || userProfile?.charName || 'Não definido'}</span>
+            <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2 mt-0.5 flex-wrap">
+              <span className="truncate">{charInfo?.name || userProfile?.charName || 'Não definido'}</span>
               {charInfo?.level && (
-                <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 text-xs font-bold">
+                <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 text-xs font-bold tabular-nums shrink-0">
                   Lv. {charInfo.level}
                 </span>
               )}
             </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
               {charInfo?.vocation || userProfile?.vocation || 'Vocação N/D'} • {charInfo?.world || 'Mundo N/D'}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-6 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
-          <div>
+        <div className="flex items-center justify-between gap-4 bg-slate-50 dark:bg-slate-800/60 p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
+          <div className="min-w-0">
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Experiência (Ontem)</span>
-            <span className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+            <span className="text-lg sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono tabular-nums block truncate">
               {loadingXp
                 ? 'Sincronizando...'
                 : typeof charInfo?.yesterdayExp === 'number'
@@ -445,7 +445,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 : '0 XP'}
             </span>
             {charInfo?.xpDate && (
-              <span className="text-[10px] text-slate-400 block mt-0.5">
+              <span className="text-[10px] text-slate-400 block mt-0.5 tabular-nums">
                 Data: {charInfo.xpDate}
               </span>
             )}
@@ -455,7 +455,8 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
             onClick={fetchCharacterXpAuto}
             disabled={loadingXp}
             title="Atualizar XP"
-            className="p-2.5 rounded-xl bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-600 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            aria-label="Atualizar XP"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-600 shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
           >
             <RefreshCw className={`h-4 w-4 ${loadingXp ? 'animate-spin' : ''}`} />
           </button>
@@ -579,12 +580,12 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 {onNavigateToLfg && (
                   <button
                     type="button"
                     onClick={onNavigateToLfg}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                    className="flex-1 sm:flex-initial min-h-[40px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap"
                   >
                     <span>Ver no Quero Hunt!</span>
                     <span className="text-[10px]">→</span>
@@ -593,7 +594,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsLfgModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800 transition-colors cursor-pointer"
+                  className="min-h-[40px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800 transition-colors cursor-pointer"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                   <span>Editar</span>
@@ -614,7 +615,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                       setDeletingLfg(false);
                     }
                   }}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer"
+                  className="min-h-[40px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span>Excluir</span>
@@ -718,9 +719,9 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
         )}
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
           {/* Day Selector Tabs */}
-          <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 bg-white dark:bg-slate-900 p-1.5 sm:p-2 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
             {DAYS_CONFIG.map(day => {
               const totalDayCount = myReservations.filter(r => r.day === day.key).length + sharedReservations.filter(r => r.day === day.key).length;
               const isSelected = selectedDay === day.key;
@@ -729,17 +730,18 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 <button
                   key={day.key}
                   onClick={() => setSelectedDay(day.key)}
-                  className={`flex-1 min-w-[120px] flex items-center justify-between px-4 py-3 rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer ${
+                  className={`min-h-[44px] flex items-center justify-between gap-1 px-2.5 sm:px-4 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-[#2160FF] text-white shadow-lg shadow-blue-500/30'
                       : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60'
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 shrink-0" />
-                    <span>{day.label}</span>
+                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                    <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 hidden xs:inline sm:inline" />
+                    <span className="sm:hidden truncate">{day.shortLabel}</span>
+                    <span className="hidden sm:inline truncate">{day.label}</span>
                   </div>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-extrabold tabular-nums shrink-0 ${
                     isSelected
                       ? 'bg-white/20 text-white'
                       : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
@@ -752,12 +754,12 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
           </div>
 
       {/* Grid Layout for Personal & Shared Reservations */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* 1. Minhas Hunts */}
-        <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-4">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2.5">
-              <div className="h-9 w-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+              <div className="h-9 w-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold shrink-0">
                 <Calendar className="h-4 w-4" />
               </div>
               <div>
@@ -772,7 +774,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
           </div>
 
           {filteredMyByDay.length === 0 ? (
-            <div className="text-center py-10 px-4">
+            <div className="text-center py-8 px-4">
               <div className="h-12 w-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-2.5">
                 <Clock className="h-6 w-6" />
               </div>
@@ -780,7 +782,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 Nenhum horário marcado neste dia
               </h4>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                Vá na aba <span className="font-bold text-blue-600">Respaws</span> para alocar seus horários.
+                Vá na aba <span className="font-bold text-blue-600">Agenda</span> para visualizar os horários.
               </p>
             </div>
           ) : (
@@ -789,12 +791,12 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 <div
                   key={res.id || `my-res-${index}`}
                   onClick={() => setEditingReservationModal(res)}
-                  className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3.5 shadow-xs hover:shadow-md transition-all flex items-center justify-between gap-4 cursor-pointer group hover:border-blue-400 dark:hover:border-blue-500"
+                  className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3.5 shadow-xs hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer group hover:border-blue-400 dark:hover:border-blue-500"
                   title="Clique para gerenciar, editar party ou liberar esta hunt"
                 >
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 text-xs font-black font-mono">
+                  <div className="space-y-1.5 min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 text-xs font-black font-mono tabular-nums">
                         <Clock className="h-3 w-3" />
                         {res.timeSlot}
                       </span>
@@ -805,15 +807,15 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                         Confirmado
                       </span>
                     </div>
-                    <div className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                    <div className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                       <MapPin className="h-3.5 w-3.5 text-blue-600 shrink-0" />
                       <span className="truncate">{res.respawnName}</span>
                     </div>
                     {(res.partyMembers || (res.partyMemberUids && res.partyMemberUids.length > 0)) && (
-                      <div className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 font-bold truncate mt-1">
+                      <div className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 font-bold truncate">
                         <Users className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">
-                          Party (Compartilhado com): {res.partyMembers || res.partyMemberUids?.map(uid => usersList.find(u => u.uid === uid)?.charName).filter(Boolean).join(', ')}
+                          Party: {res.partyMembers || res.partyMemberUids?.map(uid => usersList.find(u => u.uid === uid)?.charName).filter(Boolean).join(', ')}
                         </span>
                       </div>
                     )}
@@ -824,13 +826,13 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                     )}
                   </div>
 
-                  <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                    <div>
-                      <div className="text-xs font-bold text-slate-700 dark:text-slate-300">{res.charName}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">Editar/Party</div>
+                  <div className="w-full sm:w-auto sm:text-right shrink-0 flex flex-col sm:items-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/70 dark:border-slate-700/60">
+                    <div className="flex sm:block items-center justify-between text-xs">
+                      <div className="font-bold text-slate-700 dark:text-slate-300">{res.charName}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">Toque p/ Party</div>
                     </div>
                     {((userProfile?.charName && (res.charName?.trim().toLowerCase() === userProfile.charName.trim().toLowerCase() || getCanonicalPlayerName(res.charName).toLowerCase() === userProfile.charName.trim().toLowerCase())) || res.userUid === userProfile?.uid || userProfile?.rank === 'Leader' || userProfile?.isAdmin) && (
-                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:gap-1.5 sm:flex-wrap sm:justify-end w-full sm:w-auto">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -839,7 +841,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                             handleToggleVisibility(res);
                           }}
                           disabled={updatingVisId === res.id}
-                          className={`px-2 py-1.5 rounded-lg text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 shrink-0 ${
+                          className={`min-h-[40px] sm:min-h-[32px] px-2.5 py-1.5 rounded-xl sm:rounded-lg text-[11px] sm:text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1 shrink-0 whitespace-nowrap ${
                             res.isPublicVisibility
                               ? 'bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900/90 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
                               : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
@@ -852,13 +854,13 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                         >
                           {res.isPublicVisibility ? (
                             <>
-                              <Eye className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                              <span>Visível na Guild</span>
+                              <Eye className="h-3.5 w-3.5 sm:h-3 sm:w-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span>Visível Guild</span>
                             </>
                           ) : (
                             <>
-                              <Lock className="h-3 w-3 text-slate-500" />
-                              <span>Ocupado (Privado)</span>
+                              <Lock className="h-3.5 w-3.5 sm:h-3 sm:w-3 text-slate-500 shrink-0" />
+                              <span>Privado</span>
                             </>
                           )}
                         </button>
@@ -870,11 +872,11 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                             e.preventDefault();
                             handleOpenReleaseConfirm(res);
                           }}
-                          className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                          className="min-h-[40px] sm:min-h-[32px] px-2.5 py-1.5 rounded-xl sm:rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] sm:text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1 shrink-0 whitespace-nowrap"
                           title="Liberar este respawn para a guild"
                         >
-                          <Trash2 className="h-3 w-3" />
-                          <span>Liberar Respawn</span>
+                          <Trash2 className="h-3.5 w-3.5 sm:h-3 sm:w-3 shrink-0" />
+                          <span>Liberar</span>
                         </button>
                       </div>
                     )}
@@ -948,11 +950,12 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
       {/* Modal to Add Players to Track XP */}
       {isAddTrackOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-4">
+            <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto -mt-1 mb-1 sm:hidden" />
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <UserCheck className="h-5 w-5 text-emerald-600" />
+                <UserCheck className="h-5 w-5 text-emerald-600 shrink-0" />
                 <h3 className="text-base font-black text-slate-900 dark:text-white">
                   Incluir Jogadores para Acompanhar XP
                 </h3>
@@ -960,7 +963,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAddTrackOpen(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -973,12 +976,12 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 value={trackSearchQuery}
                 onChange={e => setTrackSearchQuery(e.target.value)}
                 placeholder="Buscar por nome do char ou guilda..."
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 pl-9 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 pl-9 text-sm sm:text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
-              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
             </div>
 
-            <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
               {availableUsersToTrack.length === 0 ? (
                 <div className="py-10 text-center text-xs text-slate-400">
                   Nenhum jogador encontrado com este termo ou todos já estão sendo acompanhados.
@@ -1008,7 +1011,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                       <button
                         type="button"
                         onClick={() => addTrackedPlayer(u.uid)}
-                        className="flex items-center gap-1 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer shrink-0"
+                        className="min-h-[40px] flex items-center gap-1 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer shrink-0"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         <span>Acompanhar</span>
@@ -1023,7 +1026,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAddTrackOpen(false)}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md transition-colors cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md transition-colors cursor-pointer"
               >
                 Concluir
               </button>
@@ -1034,11 +1037,12 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
       {/* Modal / Drawer for Managing Party Visibility */}
       {isPartyManageOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-4 sm:space-y-5">
+            <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto -mt-1 mb-1 sm:hidden" />
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2.5">
-                <div className="h-9 w-9 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                <div className="h-9 w-9 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold shrink-0">
                   <Share2 className="h-4 w-4" />
                 </div>
                 <div>
@@ -1051,14 +1055,14 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               <button
                 type="button"
                 onClick={() => setIsPartyManageOpen(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {/* Global Guild Visibility Toggle */}
-            <div className="p-3.5 rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/60 dark:bg-blue-950/40 flex items-center justify-between gap-3">
+            <div className="p-3.5 rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/60 dark:bg-blue-950/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="space-y-0.5 min-w-0">
                 <div className="flex items-center gap-2">
                   <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
@@ -1073,7 +1077,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               <button
                 type="button"
                 onClick={toggleShareWithAll}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                className={`min-h-[40px] w-full sm:w-auto px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
                   isSharedWithAll
                     ? 'bg-blue-600 text-white shadow-xs'
                     : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-300'
@@ -1083,7 +1087,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               </button>
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                 Membros com acesso ({selectedPartyMembers.length})
               </span>
@@ -1093,14 +1097,14 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                   setPartySearchQuery('');
                   setIsAddPartyOpen(true);
                 }}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                className="min-h-[40px] flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
               >
                 <UserPlus className="h-3.5 w-3.5" />
                 <span>Adicionar Membro</span>
               </button>
             </div>
 
-            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
               {selectedPartyMembers.length === 0 ? (
                 <div className="py-8 text-center text-xs text-slate-400 italic">
                   Nenhum membro na sua party com acesso liberado.
@@ -1127,7 +1131,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                       <button
                         type="button"
                         onClick={() => removePartyMember(u.uid)}
-                        className="px-2.5 py-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40 text-xs font-bold transition-colors cursor-pointer"
+                        className="min-h-[36px] px-2.5 py-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40 text-xs font-bold transition-colors cursor-pointer shrink-0"
                       >
                         Remover
                       </button>
@@ -1141,7 +1145,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               <button
                 type="button"
                 onClick={() => setIsPartyManageOpen(false)}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold shadow-md transition-colors cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold shadow-md transition-colors cursor-pointer"
               >
                 Concluir
               </button>
@@ -1152,8 +1156,9 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
       {/* Modal to Add Party Member with Search and Alphabetical Order */}
       {isAddPartyOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-4">
+            <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto -mt-1 mb-1 sm:hidden" />
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <UserPlus className="h-5 w-5 text-blue-600" />
@@ -1164,7 +1169,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAddPartyOpen(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1177,12 +1182,12 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 value={partySearchQuery}
                 onChange={e => setPartySearchQuery(e.target.value)}
                 placeholder="Buscar por nome do char ou guilda..."
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 pl-9 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 pl-9 text-sm sm:text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
             </div>
 
-            <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
               {availableUsersToAdd.length === 0 ? (
                 <div className="py-10 text-center text-xs text-slate-400">
                   Nenhum jogador encontrado com este termo ou todos já possuem acesso.
@@ -1212,7 +1217,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                       <button
                         type="button"
                         onClick={() => addPartyMember(u.uid)}
-                        className="flex items-center gap-1 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer shrink-0"
+                        className="min-h-[40px] flex items-center gap-1 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer shrink-0"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         <span>Liberar</span>
@@ -1227,7 +1232,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAddPartyOpen(false)}
-                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition-colors cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition-colors cursor-pointer"
               >
                 Concluir
               </button>
@@ -1251,8 +1256,9 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
       {/* Modal de Confirmacao In-App para Liberar Respawn */}
       {releaseConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-5 pb-safe">
+            <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto -mt-1 mb-1 sm:hidden" />
             <div className="flex items-center gap-3">
               <div className="h-11 w-11 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center font-bold shrink-0">
                 <Trash2 className="h-6 w-6" />
@@ -1268,23 +1274,23 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Respawn:</span>
-                <strong className="text-slate-900 dark:text-white font-black">{releaseConfirmModal.respawnName}</strong>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 shrink-0">Respawn:</span>
+                <strong className="text-slate-900 dark:text-white font-black text-right truncate">{releaseConfirmModal.respawnName}</strong>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Horário:</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 shrink-0">Horário:</span>
                 <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{releaseConfirmModal.timeSlot}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Dia:</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 shrink-0">Dia:</span>
                 <span className="font-bold text-slate-700 dark:text-slate-300">
                   {releaseConfirmModal.day === 'friday' ? 'Sexta-feira' : releaseConfirmModal.day === 'saturday' ? 'Sábado' : 'Domingo'}
                 </span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Jogador Marcado:</span>
-                <strong className="text-slate-900 dark:text-white">{releaseConfirmModal.charName || userProfile?.charName}</strong>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 shrink-0">Jogador Marcado:</span>
+                <strong className="text-slate-900 dark:text-white truncate">{releaseConfirmModal.charName || userProfile?.charName}</strong>
               </div>
             </div>
 
@@ -1292,12 +1298,12 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               Tem certeza que deseja liberar este respawn? Ele será removido das suas reservas e ficará imediatamente visível e disponível para todos os jogadores na aba <strong className="text-blue-600 dark:text-blue-400">Respaws Liberados</strong> e no grid geral.
             </p>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 disabled={isReleasing}
                 onClick={() => setReleaseConfirmModal(null)}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
               >
                 Cancelar
               </button>
@@ -1305,7 +1311,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                 type="button"
                 disabled={isReleasing}
                 onClick={executeReleaseRespawn}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-500/20 disabled:opacity-50 transition-all cursor-pointer"
               >
                 {isReleasing ? (
                   <>

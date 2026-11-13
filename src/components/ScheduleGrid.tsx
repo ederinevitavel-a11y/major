@@ -32,6 +32,7 @@ import {
   Lock,
   RotateCcw,
   CheckCircle2,
+  X,
 } from 'lucide-react';
 
 const normalizeRespawnName = (n: string): string =>
@@ -49,7 +50,7 @@ const isSpecialRespawn = (respawnName: string): boolean => {
   return PLANILHADOS_RESPAWNS.some(p => normalizeRespawnName(p) === norm);
 };
 
-const doesReservationMatchSlot = (r: Reservation, targetRespawn: string, targetTime: string, isSpecial: boolean): boolean => {
+const doesReservationMatchExactSlot = (r: Reservation, targetRespawn: string, targetTime: string): boolean => {
   // 1. Respawn match
   const rNorm = normalizeRespawnName(r.respawnName);
   const targetNorm = normalizeRespawnName(targetRespawn);
@@ -71,18 +72,36 @@ const doesReservationMatchSlot = (r: Reservation, targetRespawn: string, targetT
     }
   }
 
-  // 4. Minute Range Overlap for Specials
-  // If targetTime overlaps significantly with the reservation's actual hunting time
+  // 4. Exact minute range match
   const targetRange = parseSlotRange(targetTime);
   const resTime = r.exactTime || (r.notes && r.notes.match(/Horário Planilhado:\s*([^\s(]+(?:\s*[–\-]\s*[^\s(]+)?)/i)?.[1]) || r.timeSlot;
   const resRange = parseSlotRange(resTime);
 
   if (targetRange.start > 0 && resRange.start > 0) {
-    // Exact start and end
     if (targetRange.start === resRange.start && targetRange.end === resRange.end) {
       return true;
     }
-    // Check overlap
+  }
+
+  return false;
+};
+
+const doesReservationMatchSlot = (r: Reservation, targetRespawn: string, targetTime: string, isSpecial: boolean): boolean => {
+  if (doesReservationMatchExactSlot(r, targetRespawn, targetTime)) return true;
+
+  // 1. Respawn match
+  const rNorm = normalizeRespawnName(r.respawnName);
+  const targetNorm = normalizeRespawnName(targetRespawn);
+  if (rNorm !== targetNorm && !rNorm.includes(targetNorm) && !targetNorm.includes(rNorm)) {
+    return false;
+  }
+
+  // Minute Range Overlap
+  const targetRange = parseSlotRange(targetTime);
+  const resTime = r.exactTime || (r.notes && r.notes.match(/Horário Planilhado:\s*([^\s(]+(?:\s*[–\-]\s*[^\s(]+)?)/i)?.[1]) || r.timeSlot;
+  const resRange = parseSlotRange(resTime);
+
+  if (targetRange.start > 0 && resRange.start > 0) {
     const overlapStart = Math.max(targetRange.start, resRange.start);
     const overlapEnd = Math.min(targetRange.end, resRange.end);
     if (overlapEnd - overlapStart >= 20) {
@@ -215,7 +234,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     ? NORMAL_TIME_SLOTS
     : slotType === '3h'
     ? THREE_HOUR_TIME_SLOTS
-    : Array.from(new Set(PLANILHADOS_RESPAWNS.flatMap(getPlanilhadoAllTimeSlots))).sort((a, b) => parseDayStartTime(a) - parseDayStartTime(b));
+    : Array.from(new Set(PLANILHADOS_RESPAWNS.flatMap(r => getPlanilhadoAllTimeSlots(r, selectedDay)))).sort((a, b) => parseDayStartTime(a) - parseDayStartTime(b));
 
   // Make sure activeSlotFilter is valid when slotType toggles
   useEffect(() => {
@@ -229,16 +248,30 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     respawn.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Helper to find reservation with smart cross-matching
+  // Helper to find reservation with exact-match priority and smart cross-matching
   const getReservation = (day: HuntDay, type: SlotType, respawn: string, time: string) => {
     const isSpecial = type === 'planilhados' || isSpecialRespawn(respawn);
+
+    const exactMatch = reservations.find(r => {
+      if (r.day !== day) return false;
+      if (!isSpecial && r.slotType !== type) return false;
+      return doesReservationMatchExactSlot(r, respawn, time);
+    });
+    if (exactMatch) return exactMatch;
+
+    const baseSlots = isSpecial ? getPlanilhadoAllTimeSlots(respawn, day) : [];
 
     return reservations.find(r => {
       if (r.day !== day) return false;
 
       // For special respawns, match regardless of legacy slotType ('planilhados', '3h', 'normal')
       if (isSpecial) {
-        return doesReservationMatchSlot(r, respawn, time, true);
+        if (!doesReservationMatchSlot(r, respawn, time, true)) return false;
+        // Prevent an overlapping slot from stealing a reservation that already has an exact slot
+        const hasExactElsewhere = baseSlots.some(
+          b => b !== time && doesReservationMatchExactSlot(r, respawn, b)
+        );
+        return !hasExactElsewhere;
       }
 
       // For regular slots, must match slotType
@@ -249,7 +282,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
 
   // Dedicated helper to get clean, deduplicated time slots for special respawns without phantom free slots
   const getDeduplicatedPlanilhadoSlots = (respawnName: string, day: HuntDay): string[] => {
-    const baseSlots = getPlanilhadoAllTimeSlots(respawnName);
+    const baseSlots = getPlanilhadoAllTimeSlots(respawnName, day);
     const extraSlots = reservations
       .filter(r => {
         if (r.day !== day) return false;
@@ -334,32 +367,33 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   return (
     <div className="w-full max-w-full space-y-4">
       {/* Top Filter Card */}
-      <div className="w-full max-w-full rounded-2xl border border-slate-200/90 bg-white p-3.5 sm:p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
-        <div className="flex flex-col gap-3.5">
+      <div className="w-full max-w-full rounded-2xl border border-slate-200/90 bg-white p-3 sm:p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
+        <div className="flex flex-col gap-3">
           {/* Day selection and Respawn category toggle */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3">
             {/* Day Selector */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl overflow-x-auto w-full sm:w-auto">
+            <div className="grid grid-cols-3 sm:flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-full sm:w-auto">
               {DAYS_CONFIG.map(d => (
                 <button
                   key={d.key}
                   onClick={() => setSelectedDay(d.key)}
-                  className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  className={`flex items-center justify-center gap-1.5 min-h-[40px] sm:min-h-[34px] px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                     selectedDay === d.key
                       ? 'bg-[#2160FF] text-white shadow-md shadow-blue-500/20'
                       : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  <span>{d.label}</span>
+                  <span className="sm:hidden">{d.shortLabel}</span>
+                  <span className="hidden sm:inline">{d.label}</span>
                 </button>
               ))}
             </div>
 
             {/* Category Switcher & Admin Reset Button */}
-            <div className="flex items-center gap-1.5 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+            <div className="grid grid-cols-2 sm:flex items-center gap-1.5 w-full sm:w-auto sm:flex-nowrap">
               <button
                 onClick={() => setSlotType('normal')}
-                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 min-h-[42px] sm:min-h-[36px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer whitespace-nowrap ${
                   slotType === 'normal'
                     ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:border-blue-500 dark:text-blue-300 shadow-xs'
                     : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'
@@ -371,7 +405,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
 
               <button
                 onClick={() => setSlotType('planilhados')}
-                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black border transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 min-h-[42px] sm:min-h-[36px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-black border transition-all cursor-pointer whitespace-nowrap ${
                   slotType === 'planilhados'
                     ? 'border-purple-600 bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:border-purple-500 dark:text-purple-300 shadow-xs'
                     : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'
@@ -384,7 +418,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
               {THREE_HOUR_RESPAWNS.length > 0 && (
                 <button
                   onClick={() => setSlotType('3h')}
-                  className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  className={`flex items-center justify-center gap-1.5 min-h-[42px] sm:min-h-[36px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer whitespace-nowrap ${
                     slotType === '3h'
                       ? 'border-purple-600 bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:border-purple-500 dark:text-purple-300 shadow-xs'
                       : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'
@@ -400,7 +434,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                   type="button"
                   onClick={() => setIsResetModalOpen(true)}
                   title="Reiniciar agenda de respawns (Apenas Admin)"
-                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-rose-200 dark:border-rose-900/60 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-900/50 shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                  className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 min-h-[42px] sm:min-h-[36px] px-3 py-2 rounded-xl text-xs font-bold border border-rose-200 dark:border-rose-900/60 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-900/50 shadow-xs transition-all cursor-pointer whitespace-nowrap"
                 >
                   <RotateCcw className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400 shrink-0" />
                   <span>Reiniciar Agenda</span>
@@ -410,17 +444,27 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
           </div>
 
           {/* Search, Filter Status, and View Mode Switcher */}
-          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
+          <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
             {/* Search Input */}
             <div className="relative flex-1 max-w-full md:max-w-xs">
               <input
                 type="text"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Buscar respawn (ex: AB1, Crypt, Jaded)..."
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 pl-8 text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Buscar respawn (ex: Crypt, Jaded)..."
+                className="w-full min-h-[42px] sm:min-h-[36px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 pl-9 pr-9 text-sm sm:text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-3.5 sm:w-3.5 text-slate-400 pointer-events-none" />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  aria-label="Limpar busca"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
 
             {/* Quick Status and View Mode */}
@@ -429,7 +473,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
               <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700">
                 <button
                   onClick={() => setStatusFilter('all')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all ${
+                  className={`min-h-[36px] sm:min-h-[30px] px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                     statusFilter === 'all'
                       ? 'bg-white text-slate-900 dark:bg-slate-900 dark:text-white shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
@@ -439,7 +483,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                 </button>
                 <button
                   onClick={() => setStatusFilter('free')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all ${
+                  className={`min-h-[36px] sm:min-h-[30px] px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                     statusFilter === 'free'
                       ? 'bg-white text-emerald-700 dark:bg-slate-900 dark:text-emerald-400 shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
@@ -449,7 +493,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                 </button>
                 <button
                   onClick={() => setStatusFilter('reserved')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all ${
+                  className={`min-h-[36px] sm:min-h-[30px] px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                     statusFilter === 'reserved'
                       ? 'bg-white text-blue-700 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
@@ -464,40 +508,40 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                 <button
                   onClick={() => setViewMode('cards')}
                   title="Modo Cartões (Organizado por local)"
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 min-h-[36px] sm:min-h-[30px] px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
                     viewMode === 'cards'
                       ? 'bg-white text-blue-600 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
                   }`}
                 >
                   <Smartphone className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Cartões</span>
+                  <span className="hidden xs:inline sm:inline">Cartões</span>
                 </button>
 
                 <button
                   onClick={() => setViewMode('by-time')}
                   title="Modo Por Horário (Timeline rápida)"
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 min-h-[36px] sm:min-h-[30px] px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
                     viewMode === 'by-time'
                       ? 'bg-white text-blue-600 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
                   }`}
                 >
                   <CalendarClock className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Por Horário</span>
+                  <span className="hidden xs:inline sm:inline">Horário</span>
                 </button>
 
                 <button
                   onClick={() => setViewMode('matrix')}
                   title="Modo Tabela Resumo"
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 min-h-[36px] sm:min-h-[30px] px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
                     viewMode === 'matrix'
                       ? 'bg-white text-blue-600 dark:bg-slate-900 dark:text-blue-400 shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
                   }`}
                 >
                   <LayoutGrid className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Tabela</span>
+                  <span className="hidden xs:inline sm:inline">Tabela</span>
                 </button>
               </div>
             </div>
@@ -586,7 +630,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                             ? 'Disponível - Clique para reservar'
                             : 'Disponível (Apenas Líderes e Administradores podem reservar)'
                         }
-                        className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer text-left ${
+                        className={`w-full min-h-[46px] flex items-center justify-between p-2.5 sm:p-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer text-left active:scale-[0.99] ${
                           res
                             ? isOwner
                               ? 'bg-blue-50/90 text-blue-950 border border-blue-400 dark:bg-blue-950/70 dark:text-blue-100 dark:border-blue-600 shadow-2xs ring-1 ring-blue-300 dark:ring-blue-800'
@@ -598,7 +642,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                       >
                         <div className="flex items-center gap-1.5 shrink-0">
                           <Clock className={`h-3.5 w-3.5 shrink-0 ${res ? 'text-slate-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
-                          <span className="text-xs font-mono font-bold">
+                          <span className="text-xs font-mono font-bold tabular-nums">
                             {time}
                           </span>
                         </div>
@@ -656,12 +700,12 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 block mb-2">
               Selecione o Horário Desejado ({activeTimeSlots.length} disponíveis):
             </span>
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5">
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1.5">
               {activeTimeSlots.map(time => (
                 <button
                   key={time}
                   onClick={() => setActiveSlotFilter(time)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  className={`min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 tabular-nums transition-all cursor-pointer ${
                     activeSlotFilter === time
                       ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
@@ -676,7 +720,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
           {/* List of respawns for this chosen slot */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {filteredRespawns.map(respawn => {
-              const respawnSlots = slotType === 'planilhados' ? getPlanilhadoAllTimeSlots(respawn) : activeTimeSlots;
+              const respawnSlots = slotType === 'planilhados' ? getPlanilhadoAllTimeSlots(respawn, selectedDay) : activeTimeSlots;
               if (slotType === 'planilhados' && !respawnSlots.includes(activeSlotFilter)) {
                 return null;
               }
@@ -703,7 +747,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                       ? 'Disponível - Clique para reservar'
                       : 'Disponível (Apenas Líderes e Administradores podem reservar)'
                   }
-                  className={`p-3 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between gap-2 ${
+                  className={`min-h-[54px] p-3 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between gap-2 active:scale-[0.99] ${
                     res
                       ? isOwner
                         ? 'border-blue-400 bg-blue-50/90 dark:border-blue-600 dark:bg-blue-950/60 ring-1 ring-blue-300 dark:ring-blue-800'
@@ -778,104 +822,169 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
       {viewMode === 'matrix' && (
         <div className="w-full max-w-full rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors overflow-hidden">
           {slotType === 'planilhados' ? (
-            /* DEDICATED PLANILHADOS CLEAN TABLE VIEW WITH ALL FREE & OCCUPIED SLOTS */
-            <div className="w-full overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[700px]">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-100/95 dark:bg-slate-800/95">
-                    <th className="p-3.5 text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200 w-1/4">
-                      Respawn Especial
-                    </th>
-                    <th className="p-3.5 text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-                      Todos os Horários do Dia (Ocupados e Livres - Clique para reservar/gerenciar)
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                  {filteredRespawns.map(respawn => {
-                    const respawnTimeSlots = getDeduplicatedPlanilhadoSlots(respawn, selectedDay);
+            /* DEDICATED PLANILHADOS: RESPONSIVE MOBILE LIST + DESKTOP TABLE */
+            <>
+              <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
+                {filteredRespawns.map(respawn => {
+                  const respawnTimeSlots = getDeduplicatedPlanilhadoSlots(respawn, selectedDay);
+                  return (
+                    <div key={respawn} className="p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-black text-slate-900 dark:text-white">
+                          {respawn}
+                        </span>
+                        <span className="text-[10px] font-semibold text-slate-400 tabular-nums shrink-0">
+                          {respawnTimeSlots.length} horários
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {respawnTimeSlots.map(time => {
+                          const res = getReservation(selectedDay, 'planilhados', respawn, time);
+                          if (statusFilter === 'free' && res) return null;
+                          if (statusFilter === 'reserved' && !res) return null;
 
-                    return (
-                      <tr key={respawn} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                        {/* Respawn name & badge */}
-                        <td className="p-3.5 align-top">
-                          <span className="text-xs font-black text-slate-900 dark:text-white block">
-                            {respawn}
-                          </span>
-                          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 mt-1 block">
-                            {respawnTimeSlots.length} Horários no Dia
-                          </span>
-                        </td>
+                          const isOwner = checkIsOwner(res);
+                          const canSeeDetails = checkCanSeeDetails(res);
 
-                        {/* List of ALL Time Slots with Player/Free Status */}
-                        <td className="p-3.5 align-top">
-                          <div className="flex flex-wrap items-center gap-2">
-                            {respawnTimeSlots.map(time => {
-                              const res = getReservation(selectedDay, 'planilhados', respawn, time);
-                              if (statusFilter === 'free' && res) return null;
-                              if (statusFilter === 'reserved' && !res) return null;
-
-                              const isOwner = checkIsOwner(res);
-                              const canSeeDetails = checkCanSeeDetails(res);
-
-                              return (
-                                <button
-                                  key={time}
-                                  onClick={() => handleCellClick(respawn, time)}
-                                  className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
-                                    res
-                                      ? isOwner
-                                        ? 'bg-blue-100/80 border-blue-400 text-blue-950 dark:bg-blue-950/80 dark:border-blue-600 dark:text-blue-100 shadow-2xs'
-                                        : 'bg-blue-50/90 border-blue-200 text-blue-950 dark:bg-blue-950/50 dark:border-blue-800 dark:text-blue-100 shadow-2xs'
-                                      : 'bg-emerald-50/80 border-emerald-300 text-emerald-950 hover:border-emerald-500 hover:bg-emerald-100/80 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200 shadow-2xs'
-                                  }`}
-                                >
-                                  <span className={`font-mono font-bold px-2 py-0.5 rounded border text-[11px] ${
-                                    res ? 'bg-white/80 dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-700' : 'bg-white/90 dark:bg-slate-900/90 border-emerald-200 dark:border-emerald-800'
-                                  }`}>
-                                    {time}
+                          return (
+                            <button
+                              key={time}
+                              onClick={() => handleCellClick(respawn, time)}
+                              className={`w-full min-h-[44px] flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
+                                res
+                                  ? isOwner
+                                    ? 'bg-blue-100/80 border-blue-400 text-blue-950 dark:bg-blue-950/80 dark:border-blue-600 dark:text-blue-100'
+                                    : 'bg-blue-50/90 border-blue-200 text-blue-950 dark:bg-blue-950/50 dark:border-blue-800 dark:text-blue-100'
+                                  : 'bg-emerald-50/80 border-emerald-300 text-emerald-950 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200'
+                              }`}
+                            >
+                              <span className="font-mono font-bold text-[11px] tabular-nums shrink-0">
+                                {time}
+                              </span>
+                              {res ? (
+                                canSeeDetails ? (
+                                  <span className="font-bold text-blue-900 dark:text-blue-200 truncate">
+                                    {res.charName}
                                   </span>
+                                ) : (
+                                  <span className="text-slate-500 dark:text-slate-400 font-bold flex items-center gap-1 text-[11px]">
+                                    <Lock className="h-3 w-3 text-slate-400" />
+                                    Ocupado
+                                  </span>
+                                )
+                              ) : (
+                                <span className="text-emerald-700 dark:text-emerald-400 font-extrabold flex items-center gap-0.5 text-[11px]">
+                                  <Plus className="h-3 w-3 text-emerald-600" />
+                                  LIVRE
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
-                                  {res ? (
-                                    canSeeDetails ? (
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="font-bold text-blue-900 dark:text-blue-200">
-                                          {res.charName}
-                                        </span>
-                                        {res.userRank && (
-                                          <span className={`text-[8px] font-black px-1 rounded ${RANK_METADATA[res.userRank]?.badgeClass || ''}`}>
-                                            {res.userRank[0]}
-                                          </span>
-                                        )}
-                                        {res.notes && (
-                                          <span className="text-[10px] font-extrabold text-amber-700 dark:text-amber-300">
-                                            ({res.notes.replace('Horário Planilhado: ', '')})
-                                          </span>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <span className="text-slate-500 dark:text-slate-400 font-bold flex items-center gap-1 text-[11px]">
-                                        <Lock className="h-3 w-3 text-slate-400" />
-                                        Ocupado
-                                      </span>
-                                    )
-                                  ) : (
-                                    <span className="text-emerald-700 dark:text-emerald-400 font-extrabold flex items-center gap-0.5 text-[11px]">
-                                      <Plus className="h-3 w-3 text-emerald-600" />
-                                      LIVRE
+              <div className="hidden md:block w-full overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-100/95 dark:bg-slate-800/95">
+                      <th className="p-3.5 text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200 w-1/4">
+                        Respawn Especial
+                      </th>
+                      <th className="p-3.5 text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                        Todos os Horários do Dia (Ocupados e Livres - Clique para reservar/gerenciar)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                    {filteredRespawns.map(respawn => {
+                      const respawnTimeSlots = getDeduplicatedPlanilhadoSlots(respawn, selectedDay);
+
+                      return (
+                        <tr key={respawn} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                          {/* Respawn name & badge */}
+                          <td className="p-3.5 align-top">
+                            <span className="text-xs font-black text-slate-900 dark:text-white block">
+                              {respawn}
+                            </span>
+                            <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 mt-1 block">
+                              {respawnTimeSlots.length} Horários no Dia
+                            </span>
+                          </td>
+
+                          {/* List of ALL Time Slots with Player/Free Status */}
+                          <td className="p-3.5 align-top">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {respawnTimeSlots.map(time => {
+                                const res = getReservation(selectedDay, 'planilhados', respawn, time);
+                                if (statusFilter === 'free' && res) return null;
+                                if (statusFilter === 'reserved' && !res) return null;
+
+                                const isOwner = checkIsOwner(res);
+                                const canSeeDetails = checkCanSeeDetails(res);
+
+                                return (
+                                  <button
+                                    key={time}
+                                    onClick={() => handleCellClick(respawn, time)}
+                                    className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
+                                      res
+                                        ? isOwner
+                                          ? 'bg-blue-100/80 border-blue-400 text-blue-950 dark:bg-blue-950/80 dark:border-blue-600 dark:text-blue-100 shadow-2xs'
+                                          : 'bg-blue-50/90 border-blue-200 text-blue-950 dark:bg-blue-950/50 dark:border-blue-800 dark:text-blue-100 shadow-2xs'
+                                        : 'bg-emerald-50/80 border-emerald-300 text-emerald-950 hover:border-emerald-500 hover:bg-emerald-100/80 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200 shadow-2xs'
+                                    }`}
+                                  >
+                                    <span className={`font-mono font-bold px-2 py-0.5 rounded border text-[11px] ${
+                                      res ? 'bg-white/80 dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-700' : 'bg-white/90 dark:bg-slate-900/90 border-emerald-200 dark:border-emerald-800'
+                                    }`}>
+                                      {time}
                                     </span>
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+
+                                    {res ? (
+                                      canSeeDetails ? (
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-bold text-blue-900 dark:text-blue-200">
+                                            {res.charName}
+                                          </span>
+                                          {res.userRank && (
+                                            <span className={`text-[8px] font-black px-1 rounded ${RANK_METADATA[res.userRank]?.badgeClass || ''}`}>
+                                              {res.userRank[0]}
+                                            </span>
+                                          )}
+                                          {res.notes && (
+                                            <span className="text-[10px] font-extrabold text-amber-700 dark:text-amber-300">
+                                              ({res.notes.replace('Horário Planilhado: ', '')})
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-500 dark:text-slate-400 font-bold flex items-center gap-1 text-[11px]">
+                                          <Lock className="h-3 w-3 text-slate-400" />
+                                          Ocupado
+                                        </span>
+                                      )
+                                    ) : (
+                                      <span className="text-emerald-700 dark:text-emerald-400 font-extrabold flex items-center gap-0.5 text-[11px]">
+                                        <Plus className="h-3 w-3 text-emerald-600" />
+                                        LIVRE
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : (
             /* STANDARD GRID FOR NORMAL & 3H RESPAWNS */
             <>
@@ -913,11 +1022,11 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-100/95 dark:bg-slate-800/95">
                       {/* Sticky Top-Left Corner (Respawn Column Header) */}
-                      <th className="sticky top-0 left-0 z-40 min-w-[180px] sm:min-w-[210px] max-w-[230px] p-3 text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 border-r border-b border-slate-200 dark:border-slate-700 shadow-[2px_2px_4px_-1px_rgba(0,0,0,0.06)]">
-                        <div className="flex items-center justify-between">
+                      <th className="sticky top-0 left-0 z-40 min-w-[135px] sm:min-w-[210px] max-w-[155px] sm:max-w-[230px] p-2.5 sm:p-3 text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 border-r border-b border-slate-200 dark:border-slate-700 shadow-[2px_2px_4px_-1px_rgba(0,0,0,0.06)]">
+                        <div className="flex items-center justify-between gap-1">
                           <span>Respawn</span>
                           <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 lowercase">
-                            {filteredRespawns.length} locais
+                            {filteredRespawns.length}
                           </span>
                         </div>
                       </th>
@@ -940,7 +1049,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                         className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors"
                       >
                         {/* Respawn Name Column (Sticky left) */}
-                        <td className="sticky left-0 z-20 min-w-[180px] sm:min-w-[210px] max-w-[230px] p-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-r border-slate-200 dark:border-slate-800 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">
+                        <td className="sticky left-0 z-20 min-w-[135px] sm:min-w-[210px] max-w-[155px] sm:max-w-[230px] p-2.5 sm:p-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-r border-slate-200 dark:border-slate-800 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">
                           <span className="text-xs font-bold text-slate-900 dark:text-white block leading-snug break-words">
                             {respawn}
                           </span>

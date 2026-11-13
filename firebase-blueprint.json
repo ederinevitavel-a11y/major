@@ -8,6 +8,7 @@
         "email": {
           "type": "string",
           "format": "email",
+          "maxLength": 120,
           "description": "Authorized user email address in lowercase."
         },
         "role": {
@@ -17,7 +18,13 @@
         },
         "addedBy": {
           "type": "string",
+          "maxLength": 120,
           "description": "UID or email of the admin who granted access."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Optional note about the pre-authorized member."
         },
         "createdAt": {
           "type": "string",
@@ -28,17 +35,19 @@
     },
     "userProfile": {
       "title": "UserProfile",
-      "description": "User profile linking authenticated Google account to their verified Tibia character.",
+      "description": "Private user profile containing PII (email) and personal preferences, strictly isolated to owner and admins.",
       "type": "object",
       "properties": {
         "uid": {
           "type": "string",
+          "maxLength": 128,
           "description": "Firebase Auth UID."
         },
         "email": {
           "type": "string",
           "format": "email",
-          "description": "User email address."
+          "maxLength": 120,
+          "description": "User email address (PII)."
         },
         "charName": {
           "type": "string",
@@ -57,7 +66,8 @@
         },
         "vocation": {
           "type": "string",
-          "description": "Tibia character vocation (e.g. Elite Knight, Master Sorcerer, etc)."
+          "maxLength": 50,
+          "description": "Tibia character vocation."
         },
         "level": {
           "type": "number",
@@ -66,6 +76,14 @@
         "isAdmin": {
           "type": "boolean",
           "description": "Whether user has full administrative privileges."
+        },
+        "sharedWith": {
+          "type": "array",
+          "description": "List of UIDs or 'all' allowed to see this user's reservation details."
+        },
+        "trackedXpUids": {
+          "type": "array",
+          "description": "List of UIDs tracked by this user for XP monitoring."
         },
         "createdAt": {
           "type": "string",
@@ -78,14 +96,60 @@
       },
       "required": ["uid", "email", "charName", "guildName", "rank", "isAdmin"]
     },
+    "memberDirectory": {
+      "title": "MemberDirectory",
+      "description": "PII-free guild member directory (no emails or admin flags) readable by whitelisted guild members.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Firebase Auth UID."
+        },
+        "charName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Tibia character name."
+        },
+        "guildName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Guild name."
+        },
+        "rank": {
+          "type": "string",
+          "enum": ["Leader", "Challenger", "Guardian", "Loyal", "Member", "Beginner", "Newcomer"],
+          "description": "Guild priority rank."
+        },
+        "vocation": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Tibia character vocation."
+        },
+        "level": {
+          "type": "number",
+          "description": "Tibia character level."
+        },
+        "sharedWith": {
+          "type": "array",
+          "description": "List of UIDs or 'all' allowed to view this player's hunts."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp."
+        }
+      },
+      "required": ["uid", "charName", "guildName", "rank"]
+    },
     "reservation": {
       "title": "Reservation",
-      "description": "Public schedule slot occupancy for signed-in guild members (zero PII/names).",
+      "description": "Public schedule slot occupancy for whitelisted guild members (zero PII/names).",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "Unique reservation key (e.g. day_respawn_timeslot)."
+          "maxLength": 128,
+          "description": "Unique reservation key."
         },
         "day": {
           "type": "string",
@@ -94,13 +158,13 @@
         },
         "slotType": {
           "type": "string",
-          "enum": ["normal", "3h"],
-          "description": "Whether the slot is standard (2h20m) or 3h special."
+          "enum": ["normal", "3h", "planilhados"],
+          "description": "Slot category."
         },
         "timeSlot": {
           "type": "string",
-          "maxLength": 30,
-          "description": "Time window (e.g. 08:00h – 10:20h)."
+          "maxLength": 40,
+          "description": "Time window."
         },
         "respawnName": {
           "type": "string",
@@ -109,11 +173,25 @@
         },
         "userUid": {
           "type": "string",
-          "description": "Firebase Auth UID of the reserving member (used for ownership verification)."
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the reserving member."
         },
         "isOccupied": {
           "type": "boolean",
           "description": "True indicating slot is currently taken."
+        },
+        "isPublicVisibility": {
+          "type": "boolean",
+          "description": "Whether the owner opted into displaying their charName to guild members."
+        },
+        "partyMemberUids": {
+          "type": "array",
+          "description": "UIDs of party members invited to this hunt."
+        },
+        "releasedRespawnId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Optional released respawn document ID consumed atomically during claim."
         },
         "reservedAt": {
           "type": "string",
@@ -124,11 +202,12 @@
     },
     "reservationDetails": {
       "title": "ReservationDetails",
-      "description": "Sensitive booking details (character name, party, notes) restricted to owner and admin.",
+      "description": "Sensitive booking details (character name, party, notes) restricted to owner, shared members, or admins.",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
+          "maxLength": 128,
           "description": "Matches reservation ID."
         },
         "charName": {
@@ -138,21 +217,40 @@
         },
         "userUid": {
           "type": "string",
+          "maxLength": 128,
           "description": "Firebase Auth UID."
         },
         "userRank": {
           "type": "string",
+          "maxLength": 30,
           "description": "Guild rank."
         },
         "partyMembers": {
           "type": "string",
-          "maxLength": 200,
+          "maxLength": 300,
           "description": "Party compositions."
+        },
+        "partyMemberUids": {
+          "type": "array",
+          "description": "UIDs of party members."
+        },
+        "sharedViewerUids": {
+          "type": "array",
+          "description": "UIDs or 'all' granted visibility by the owner."
+        },
+        "isPublicVisibility": {
+          "type": "boolean",
+          "description": "Visibility flag."
         },
         "notes": {
           "type": "string",
-          "maxLength": 200,
+          "maxLength": 240,
           "description": "Hunt notes."
+        },
+        "releasedRespawnId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Optional released respawn document ID consumed atomically during claim."
         },
         "createdAt": {
           "type": "string",
@@ -172,6 +270,7 @@
       "properties": {
         "activeGuilds": {
           "type": "string",
+          "maxLength": 200,
           "description": "Comma separated active guild names."
         },
         "updatedAt": {
@@ -181,6 +280,51 @@
       },
       "required": ["activeGuilds"]
     },
+    "customRespawn": {
+      "title": "CustomRespawn",
+      "description": "Custom hunt respawn added by administrator.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "type": {
+          "type": "string",
+          "enum": ["normal", "3h"]
+        },
+        "addedBy": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "type", "addedBy", "createdAt"]
+    },
+    "doubleXpRecord": {
+      "title": "DoubleXpRecord",
+      "description": "Player XP snapshot during Double XP weekend.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "charName": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "fridayExp": { "type": "number" },
+        "saturdayExp": { "type": "number" },
+        "sundayExp": { "type": "number" },
+        "totalExp": { "type": "number" },
+        "startExp": { "type": "number" },
+        "lastCapturedAt": { "type": "string" }
+      },
+      "required": ["uid", "charName", "totalExp"]
+    },
     "releasedRespawn": {
       "title": "ReleasedRespawn",
       "description": "Log of respawns voluntarily freed up by players so others can claim them early.",
@@ -188,6 +332,7 @@
       "properties": {
         "id": {
           "type": "string",
+          "maxLength": 128,
           "description": "Unique released respawn identifier."
         },
         "respawnName": {
@@ -197,7 +342,7 @@
         },
         "timeSlot": {
           "type": "string",
-          "maxLength": 30,
+          "maxLength": 40,
           "description": "Time window of the respawn."
         },
         "day": {
@@ -207,8 +352,8 @@
         },
         "slotType": {
           "type": "string",
-          "enum": ["normal", "3h"],
-          "description": "Normal or 3h slot."
+          "enum": ["normal", "3h", "planilhados"],
+          "description": "Slot type."
         },
         "charName": {
           "type": "string",
@@ -217,7 +362,13 @@
         },
         "userUid": {
           "type": "string",
+          "maxLength": 128,
           "description": "Firebase Auth UID of the player who released the respawn."
+        },
+        "claimReservationId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Target reservation ID created when claiming this released respawn."
         },
         "releasedAt": {
           "type": "string",
@@ -228,15 +379,17 @@
     },
     "lfgPost": {
       "title": "LfgPost",
-      "description": "Quero Hunt card posted by players looking for a party for double exp weekend.",
+      "description": "Quero Hunt card posted by whitelisted players looking for a party.",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "Unique identifier (usually player userUid)."
+          "maxLength": 128,
+          "description": "Unique identifier (player userUid)."
         },
         "userUid": {
           "type": "string",
+          "maxLength": 128,
           "description": "Firebase Auth UID of the player."
         },
         "charName": {
@@ -251,7 +404,7 @@
         "vocation": {
           "type": "string",
           "maxLength": 40,
-          "description": "Character vocation (EK, ED, MS, RP)."
+          "description": "Character vocation."
         },
         "phone": {
           "type": "string",
@@ -264,7 +417,7 @@
         },
         "timeSlots": {
           "type": "string",
-          "maxLength": 100,
+          "maxLength": 120,
           "description": "Description of available hours."
         },
         "notes": {
@@ -274,6 +427,7 @@
         },
         "rank": {
           "type": "string",
+          "maxLength": 30,
           "description": "Guild rank."
         },
         "createdAt": {
@@ -286,6 +440,49 @@
         }
       },
       "required": ["id", "userUid", "charName", "level", "vocation", "phone", "days", "createdAt"]
+    },
+    "adminBackup": {
+      "title": "AdminBackup",
+      "description": "Timestamped backup snapshot of special respawns configuration and bookings (admin-only).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Unique backup snapshot ID."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Human-readable backup label."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when backup was created."
+        },
+        "createdBy": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Admin email who created the backup."
+        },
+        "specialCount": {
+          "type": "number",
+          "description": "Number of special reservations included in the snapshot."
+        },
+        "respawnsCount": {
+          "type": "number",
+          "description": "Number of special respawns covered."
+        },
+        "reservations": {
+          "type": "array",
+          "description": "Special reservations snapshot."
+        },
+        "slotsConfig": {
+          "type": "object",
+          "description": "Special slots configuration metadata."
+        }
+      },
+      "required": ["id", "name", "createdAt", "createdBy", "specialCount", "respawnsCount", "reservations"]
     }
   },
   "firestore": {
@@ -295,7 +492,11 @@
     },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/userProfile" },
-      "description": "Registered guild member profiles linked to character."
+      "description": "Private guild member profiles containing PII (strictly owner or admin)."
+    },
+    "/member_directory/{userId}": {
+      "schema": { "$ref": "#/entities/memberDirectory" },
+      "description": "PII-free directory of registered guild characters for whitelisted members."
     },
     "/reservations/{reservationId}": {
       "schema": { "$ref": "#/entities/reservation" },
@@ -303,11 +504,19 @@
     },
     "/reservation_details/{reservationId}": {
       "schema": { "$ref": "#/entities/reservationDetails" },
-      "description": "Private character and party details accessible only by owner or admins."
+      "description": "Private character and party details accessible only by owner, shared members, or admins."
     },
     "/guild_settings/{settingId}": {
       "schema": { "$ref": "#/entities/guildSetting" },
       "description": "Guild app configuration parameters."
+    },
+    "/custom_respawns/{respawnId}": {
+      "schema": { "$ref": "#/entities/customRespawn" },
+      "description": "Custom hunt respawns managed by admin."
+    },
+    "/double_xp_records/{recordId}": {
+      "schema": { "$ref": "#/entities/doubleXpRecord" },
+      "description": "Double XP progress records per player."
     },
     "/released_respawns/{releasedId}": {
       "schema": { "$ref": "#/entities/releasedRespawn" },
@@ -315,7 +524,11 @@
     },
     "/lfg_posts/{postId}": {
       "schema": { "$ref": "#/entities/lfgPost" },
-      "description": "Quero Hunt party search cards."
+      "description": "Quero Hunt party search cards (whitelisted guild members only)."
+    },
+    "/admin_backups/{backupId}": {
+      "schema": { "$ref": "#/entities/adminBackup" },
+      "description": "Admin-only backups of special respawns configuration."
     }
   }
 }

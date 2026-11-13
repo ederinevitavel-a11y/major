@@ -103,26 +103,27 @@ export const FirstLoginModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 transition-all">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+      <div className="relative w-full max-w-lg max-h-[92dvh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white p-5 sm:p-6 pb-safe shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 transition-all animate-in slide-in-from-bottom duration-200">
         {/* Header decoration */}
-        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-400" />
+        <div className="hidden sm:block absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-400" />
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700 sm:hidden" />
 
-        <div className="flex items-center gap-3 mb-5">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-500/20">
-            <Shield className="h-6 w-6" />
+        <div className="flex items-center gap-3 mb-4 sm:mb-5">
+          <div className="flex h-11 w-11 sm:h-12 sm:w-12 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-500/20 shrink-0">
+            <Shield className="h-5 w-5 sm:h-6 sm:w-6" />
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+          <div className="min-w-0">
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white leading-tight">
               Vincular Personagem da Guild
             </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 break-all">
               Conectado como <span className="font-semibold text-blue-600 dark:text-blue-400">{currentUser?.email}</span>
             </p>
           </div>
         </div>
 
-        <p className="text-sm text-slate-600 dark:text-slate-300 mb-5 leading-relaxed">
+        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mb-4 sm:mb-5 leading-relaxed">
           Para ter acesso às reservas de respawns e sorteios do <strong className="text-blue-600 dark:text-blue-400">Major</strong>, informe o nome exato do seu personagem para validação automática nas APIs oficiais de <strong>Missclick</strong> e <strong>Caxambu</strong>.
         </p>
 
@@ -138,13 +139,13 @@ export const FirstLoginModal: React.FC = () => {
                   type="button"
                   key={g.name}
                   onClick={() => setSelectedGuild(g.name)}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-semibold transition-all ${
+                  className={`min-h-[44px] flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-semibold transition-all cursor-pointer ${
                     selectedGuild === g.name
                       ? 'border-blue-600 bg-blue-50/70 text-blue-700 dark:bg-blue-950/40 dark:border-blue-500 dark:text-blue-300 shadow-sm'
                       : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
                   }`}
                 >
-                  <Sparkles className="h-4 w-4" />
+                  <Sparkles className="h-4 w-4 shrink-0" />
                   {g.name}
                 </button>
               ))}
@@ -162,16 +163,16 @@ export const FirstLoginModal: React.FC = () => {
                 onChange={e => setCharName(e.target.value)}
                 placeholder="Ex: Major Striker, Lord Missclick..."
                 disabled={loading || submitting}
-                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 pr-10 text-sm font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 pr-10 text-sm font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
-              <Search className="absolute right-3.5 top-3 h-4 w-4 text-slate-400" />
+              <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             </div>
           </div>
 
           <button
             type="submit"
             disabled={loading || submitting || !charName.trim()}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white shadow-md shadow-blue-600/20 hover:bg-blue-700 disabled:opacity-50 transition-all cursor-pointer"
+            className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white shadow-md shadow-blue-600/20 hover:bg-blue-700 disabled:opacity-50 transition-all cursor-pointer"
           >
             {loading ? (
               <>
@@ -247,7 +248,7 @@ export const FirstLoginModal: React.FC = () => {
               type="button"
               onClick={handleConfirmLink}
               disabled={submitting}
-              className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-700 disabled:opacity-50 transition-all cursor-pointer"
+              className="mt-4 w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-700 disabled:opacity-50 transition-all cursor-pointer"
             >
               {submitting ? (
                 <>
@@ -265,11 +266,11 @@ export const FirstLoginModal: React.FC = () => {
         )}
 
         {/* Footer */}
-        <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={signOut}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+            className="py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer"
           >
             Sair desta conta Google
           </button>

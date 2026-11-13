@@ -9,7 +9,7 @@ import {
 import { auth, testConnection, db } from '../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import { UserProfile } from '../types';
-import { getUserProfile, isEmailWhitelisted, saveUserProfile, updateUserPresence } from '../services/firestoreService';
+import { getUserProfile, isEmailWhitelisted, saveUserProfile, updateUserPresence, ensureMemberDirectoryEntry } from '../services/firestoreService';
 import { SUPER_ADMIN_EMAIL } from '../constants/guildData';
 
 interface AuthContextType {
@@ -90,9 +90,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Check email admin role notice:', err);
     }
 
-    setIsAuthorized(authorized);
-
     if (!authorized) {
+      setIsAuthorized(false);
       setUserProfile(null);
       setIsAdmin(false);
       setNeedsCharacterLink(false);
@@ -100,7 +99,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Profile check
+    // Profile check (resolve isAdmin and profile before flipping isAuthorized to true to avoid transient non-admin queries)
     try {
       let profile = await getUserProfile(user.uid);
       if (profile) {
@@ -119,19 +118,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
           saveUserProfile(profile).catch((err: unknown) => console.warn('Sync profile admin:', err));
         }
+        ensureMemberDirectoryEntry(profile).catch(() => {});
         setUserProfile(profile);
         setIsAdmin(isSuper || isEmailAdmin || Boolean(profile.isAdmin));
         setNeedsCharacterLink(false);
+        setIsAuthorized(true);
       } else {
         // Needs to link Tibia character
         setUserProfile(null);
         setIsAdmin(isSuper || isEmailAdmin);
         setNeedsCharacterLink(true);
+        setIsAuthorized(true);
       }
     } catch (err) {
       console.error('Error fetching user profile:', err);
       // If profile read failed, allow linking
+      setIsAdmin(isSuper || isEmailAdmin);
       setNeedsCharacterLink(true);
+      setIsAuthorized(true);
     } finally {
       setLoading(false);
     }

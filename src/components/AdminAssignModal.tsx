@@ -8,6 +8,7 @@ import {
   THREE_HOUR_TIME_SLOTS,
   PLANILHADOS_RESPAWNS,
   PLANILHADOS_SLOTS_MAP,
+  PLANILHADOS_SLOTS_BY_DAY,
   RANK_METADATA,
 } from '../constants/guildData';
 import { setReservation, deleteReservation, isUserOnline } from '../services/firestoreService';
@@ -106,13 +107,15 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
     if (slotType === 'normal') {
       return NORMAL_TIME_SLOTS;
     }
-    // Check if respawn has specific pre-configured slots in PLANILHADOS_SLOTS_MAP
-    const preconfigured = PLANILHADOS_SLOTS_MAP[selectedRespawn];
+    // Check if respawn has specific pre-configured slots in PLANILHADOS_SLOTS_BY_DAY or PLANILHADOS_SLOTS_MAP
+    const preconfigured =
+      PLANILHADOS_SLOTS_BY_DAY[selectedRespawn]?.[selectedDay] ||
+      PLANILHADOS_SLOTS_MAP[selectedRespawn];
     if (preconfigured && preconfigured.length > 0) {
       return preconfigured;
     }
     return THREE_HOUR_TIME_SLOTS.length > 0 ? THREE_HOUR_TIME_SLOTS : NORMAL_TIME_SLOTS;
-  }, [slotType, selectedRespawn]);
+  }, [slotType, selectedRespawn, selectedDay]);
 
   // Set initial selected respawn and time slot when switching slot type or list
   useEffect(() => {
@@ -221,40 +224,43 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-0 sm:p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl rounded-t-3xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden my-0 sm:my-6 animate-in slide-in-from-bottom duration-250">
+      <div className="w-full max-w-2xl max-h-[92dvh] flex flex-col rounded-t-3xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden my-0 sm:my-6 animate-in slide-in-from-bottom duration-200 pb-safe">
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-blue-50/80 via-white to-slate-50 dark:from-slate-800/80 dark:via-slate-900 dark:to-slate-800/50">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25">
-              <Shield className="h-6 w-6" />
-            </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Cadastrar & Atribuir Respawn
-                </h3>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  Painel Major
-                </span>
+        <div className="pt-3 sm:pt-5 px-4 sm:px-5 pb-3.5 sm:pb-5 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-blue-50/80 via-white to-slate-50 dark:from-slate-800/80 dark:via-slate-900 dark:to-slate-800/50 shrink-0">
+          <div className="mx-auto mb-2.5 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700 sm:hidden" />
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 shrink-0">
+                <Shield className="h-5 w-5 sm:h-6 sm:w-6" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
+                    Cadastrar & Atribuir Respawn
+                  </h3>
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                    Major
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                  {activeUser
+                    ? `Alocando para ${activeUser.charName} (Lv ${activeUser.level} • ${activeUser.vocation})`
+                    : 'Escolha um jogador e atribua o respawn'}
+                </p>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {activeUser
-                  ? `Alocando para ${activeUser.charName} (Lv ${activeUser.level} • ${activeUser.vocation})`
-                  : 'Escolha um jogador e atribua o respawn'}
-              </p>
             </div>
-          </div>
 
-          <button
-            onClick={onClose}
-            className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
-          >
-            <X className="h-5 w-5" />
-          </button>
+            <button
+              onClick={onClose}
+              className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer shrink-0"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Content */}
-        <div className="p-5 space-y-5 max-h-[75vh] overflow-y-auto">
+        <div className="p-4 sm:p-5 space-y-4 sm:space-y-5 flex-1 overflow-y-auto">
           {error && (
             <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-300">
               <AlertCircle className="h-4 w-4 shrink-0" />
@@ -291,13 +297,13 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
 
             {/* Quick search input */}
             <div className="relative">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 type="text"
                 value={playerSearchQuery}
                 onChange={e => setPlayerSearchQuery(e.target.value)}
                 placeholder="Filtrar membro por nome, vocação ou rank..."
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 pl-9 pr-3.5 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full min-h-[44px] sm:min-h-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 pl-9 pr-3.5 py-2 text-sm sm:text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
@@ -305,7 +311,7 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
             <select
               value={selectedUserUid}
               onChange={e => setSelectedUserUid(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm sm:text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {filteredUsers.map(user => {
                 const online = isUserOnline(user);
@@ -328,28 +334,28 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
                 {userReservations.map(res => (
                   <div
                     key={res.id}
-                    className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200/70 dark:border-slate-700/70 text-xs"
+                    className="flex items-center justify-between gap-2 p-2.5 sm:p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200/70 dark:border-slate-700/70 text-xs"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 shrink-0">
                         {res.day === 'friday' ? 'SEX' : res.day === 'saturday' ? 'SÁB' : 'DOM'}
                       </span>
-                      <strong className="text-slate-900 dark:text-white font-bold">
+                      <strong className="text-slate-900 dark:text-white font-bold truncate">
                         {res.respawnName}
                       </strong>
-                      <span className="text-slate-500 dark:text-slate-400 font-mono text-[11px]">
+                      <span className="text-slate-500 dark:text-slate-400 font-mono text-[11px] tabular-nums">
                         {res.timeSlot}
                       </span>
                     </div>
 
                     {confirmDeleteId === res.id ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-rose-600 font-bold">Confirmar?</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-rose-600 font-bold hidden sm:inline">Confirmar?</span>
                         <button
                           type="button"
                           onClick={() => handleCancelReservation(res.id, res.respawnName)}
                           disabled={deletingId === res.id}
-                          className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold hover:bg-rose-700"
+                          className="px-2.5 py-1.5 sm:py-0.5 rounded bg-rose-600 text-white text-[11px] sm:text-[10px] font-bold hover:bg-rose-700"
                         >
                           Sim
                         </button>
@@ -446,7 +452,7 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
               <select
                 value={selectedRespawn}
                 onChange={e => setSelectedRespawn(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm sm:text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {activeRespawns.map(resp => (
                   <option key={resp} value={resp}>
@@ -458,7 +464,7 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
 
             {/* 5. Time Slot Picker with Occupancy Indicator */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                   5. Horário Desejado
                 </label>
@@ -467,7 +473,7 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
                   onClick={() => setUseCustomTime(!useCustomTime)}
                   className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                 >
-                  {useCustomTime ? 'Voltar para Horários Pré-definidos' : '+ Horário Personalizado'}
+                  {useCustomTime ? 'Voltar para Pré-definidos' : '+ Horário Personalizado'}
                 </button>
               </div>
 
@@ -478,7 +484,7 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
                     value={customTimeInput}
                     onChange={e => setCustomTimeInput(e.target.value)}
                     placeholder="Ex: 20:40h – 23:00h ou 14:00h – 16:00h"
-                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm sm:text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
                     Digite o intervalo no formato HH:MMh – HH:MMh.
@@ -496,7 +502,7 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
                         key={time}
                         type="button"
                         onClick={() => setSelectedTimeSlot(time)}
-                        className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                        className={`min-h-[50px] p-2.5 rounded-xl border text-left transition-all cursor-pointer active:scale-[0.99] ${
                           isSelected
                             ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 ring-2 ring-blue-500/20'
                             : occ
@@ -504,10 +510,10 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
                             : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:border-blue-300'
                         }`}
                       >
-                        <div className="text-[11px] font-bold font-mono">{time}</div>
-                        <div className="mt-1 flex items-center justify-between text-[10px]">
+                        <div className="text-[11px] font-bold font-mono tabular-nums">{time}</div>
+                        <div className="mt-1 flex items-center justify-between text-[10px] truncate">
                           {occ ? (
-                            <span className={`font-semibold ${isOccupiedByTarget ? 'text-blue-600 dark:text-blue-400' : 'text-rose-500'}`}>
+                            <span className={`font-semibold truncate ${isOccupiedByTarget ? 'text-blue-600 dark:text-blue-400' : 'text-rose-500'}`}>
                               {isOccupiedByTarget ? 'Deste char' : `${occ.charName || 'Ocupado'}`}
                             </span>
                           ) : (
@@ -540,16 +546,16 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 placeholder="Ex: Escala de Double XP / Party com ED e MS..."
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm sm:text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
@@ -557,7 +563,7 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
               <button
                 type="submit"
                 disabled={submitting || !activeUser}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
               >
                 {submitting ? (
                   <>
