@@ -137,9 +137,15 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     if (res.userUid === currentUser.uid) return true;
     if (userProfile?.charName && res.charName) {
       const myName = userProfile.charName.trim().toLowerCase();
+      const myCanonical = getCanonicalPlayerName(userProfile.charName).toLowerCase();
       const resName = res.charName.trim().toLowerCase();
       const canonicalResName = getCanonicalPlayerName(res.charName).toLowerCase();
-      return resName === myName || canonicalResName === myName;
+      return (
+        resName === myName ||
+        canonicalResName === myName ||
+        resName === myCanonical ||
+        canonicalResName === myCanonical
+      );
     }
     return false;
   };
@@ -350,7 +356,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     setModalData({
       isOpen: true,
       day: selectedDay,
-      slotType,
+      slotType: existing?.slotType || (isSpecialRespawn(respawn) ? 'planilhados' : slotType),
       respawnName: respawn,
       timeSlot: time,
       existingReservation: existing,

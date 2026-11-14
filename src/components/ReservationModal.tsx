@@ -56,7 +56,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
       existingReservation.userUid === currentUser.uid ||
       (userProfile?.charName && existingReservation.charName && (
         existingReservation.charName.trim().toLowerCase() === userProfile.charName.trim().toLowerCase() ||
-        getCanonicalPlayerName(existingReservation.charName).toLowerCase() === userProfile.charName.trim().toLowerCase()
+        getCanonicalPlayerName(existingReservation.charName).toLowerCase() === userProfile.charName.trim().toLowerCase() ||
+        existingReservation.charName.trim().toLowerCase() === getCanonicalPlayerName(userProfile.charName).toLowerCase() ||
+        getCanonicalPlayerName(existingReservation.charName).toLowerCase() === getCanonicalPlayerName(userProfile.charName).toLowerCase()
       ))
     )
   );
@@ -143,7 +145,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         throw new Error('Usuário inválido para a reserva.');
       }
 
-      const reservationId = `${day}_${respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
+      const reservationId =
+        existingReservation?.id ||
+        `${day}_${respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
 
       const sharedUserNames = usersList
         .filter(u => selectedPartyUids.includes(u.uid))
@@ -153,7 +157,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
       const newReservation: Reservation = {
         id: reservationId,
         day,
-        slotType,
+        slotType: existingReservation?.slotType || slotType,
         timeSlot,
         respawnName,
         charName: reservingUser.charName,
@@ -161,6 +165,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         userRank: reservingUser.rank,
         partyMembers: sharedUserNames,
         partyMemberUids: selectedPartyUids,
+        isPublicVisibility: existingReservation?.isPublicVisibility ?? false,
         notes: notes.trim() || '',
         reservedAt: existingReservation?.reservedAt || new Date().toISOString(),
       };

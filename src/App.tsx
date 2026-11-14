@@ -24,6 +24,7 @@ import {
   subscribeToCustomRespawns,
   subscribeToReleasedRespawns,
   subscribeToLfgPosts,
+  reconcileFixedReservationsWithUsers,
 } from './services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from './services/tibiaDataService';
 import { DEFAULT_GUILDS, getCanonicalPlayerName } from './constants/guildData';
@@ -57,6 +58,7 @@ const MainDashboard: React.FC = () => {
   const [isExportOpen, setIsExportOpen] = useState(false);
 
   const hasSyncedDirectoryRef = useRef(false);
+  const reconciledFixedIdsRef = useRef<Set<string>>(new Set());
 
   // Security: Only administrators fetch full /users profiles (which contain emails/PII).
   // Regular members only read the PII-free /member_directory collection.
@@ -238,10 +240,26 @@ const MainDashboard: React.FC = () => {
       isAdmin,
       list => {
         setReservations(list);
-      }
+      },
+      undefined,
+      userProfile?.charName
     );
     return () => unsub();
-  }, [loading, currentUser, isAuthorized, isAdmin]);
+  }, [loading, currentUser, isAuthorized, isAdmin, userProfile?.charName]);
+
+  // Admin auto-reconciliation: upgrade any stored fixed-* reservation docs to the player's real Firebase UID
+  useEffect(() => {
+    if (loading || !currentUser || !isAuthorized || !isAdmin) return;
+    if (reservations.length === 0 || usersList.length === 0) return;
+
+    const pending = reservations.filter(
+      r => r.userUid?.startsWith('fixed-') && r.charName && !reconciledFixedIdsRef.current.has(r.id)
+    );
+    if (pending.length === 0) return;
+
+    pending.forEach(r => reconciledFixedIdsRef.current.add(r.id));
+    reconcileFixedReservationsWithUsers(pending, usersList).catch(() => {});
+  }, [loading, currentUser, isAuthorized, isAdmin, reservations, usersList]);
 
   // Dynamically link reservations (especially fixed special schedule slots) to registered user accounts by character name,
   // while masking fixed-slot third-party details for non-admin members unless owned/shared/public.

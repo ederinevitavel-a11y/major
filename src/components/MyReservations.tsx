@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, UserProfile, LfgPost, HuntDay } from '../types';
 import { Calendar, Clock, MapPin, User, Shield, CheckCircle2, Users, Eye, Share2, Plus, X, UserPlus, Search, Settings, RefreshCw, Zap, Award, TrendingUp, UserCheck, Settings2, Trash2, AlertTriangle, Loader2, Swords, Phone, Pencil, MessageCircle, Flame, Lock } from 'lucide-react';
-import { DAYS_CONFIG, RANK_METADATA, getCanonicalPlayerName } from '../constants/guildData';
+import {
+  DAYS_CONFIG,
+  RANK_METADATA,
+  getCanonicalPlayerName,
+  parseDayStartTime,
+  resolveAgendaCanonicalReservation,
+  getReservationDedupeKey,
+} from '../constants/guildData';
 import { updateUserProfile, addReleasedRespawn, deleteReservation, deleteLfgPost, updateReservationVisibility } from '../services/firestoreService';
 import { fetchCharacter, TibiaCharacterInfo } from '../services/tibiaDataService';
 import { fetchCharacterHighscores } from '../services/missclickApi';
@@ -61,11 +68,17 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
   const [isReleasing, setIsReleasing] = useState(false);
 
   const handleOpenReleaseConfirm = (res: Reservation) => {
+    const myChar = userProfile?.charName?.trim().toLowerCase() || '';
+    const myCanonical = getCanonicalPlayerName(userProfile?.charName).toLowerCase();
+    const resChar = res.charName?.trim().toLowerCase() || '';
+    const resCanonical = getCanonicalPlayerName(res.charName).toLowerCase();
     const isMarkedPlayer =
-      (userProfile?.charName &&
-        (res.charName?.trim().toLowerCase() === userProfile.charName.trim().toLowerCase() ||
-          getCanonicalPlayerName(res.charName).toLowerCase() === userProfile.charName.trim().toLowerCase())) ||
-      (userProfile?.uid && res.userUid === userProfile.uid);
+      (Boolean(myChar) &&
+        (resChar === myChar ||
+          resCanonical === myChar ||
+          resChar === myCanonical ||
+          resCanonical === myCanonical)) ||
+      (Boolean(userProfile?.uid) && res.userUid === userProfile?.uid);
     const canRelease = isMarkedPlayer || userProfile?.rank === 'Leader' || Boolean(userProfile?.isAdmin);
 
     if (!canRelease) {
@@ -293,29 +306,67 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
   };
 
   const myCharName = userProfile?.charName?.trim().toLowerCase() || '';
+  const myCanonicalChar = getCanonicalPlayerName(userProfile?.charName).toLowerCase();
   const myUserId = userProfile?.uid || '';
 
-  const myReservations = reservations.filter(res => {
+  const isOwnedReservation = (res: Reservation): boolean => {
+    if (res.isOccupied === false) return false;
     const resChar = res.charName?.trim().toLowerCase() || '';
     const canonicalResChar = getCanonicalPlayerName(res.charName).toLowerCase();
     const resUserId = res.userUid || '';
-    return (
-      (myCharName && (resChar === myCharName || canonicalResChar === myCharName)) ||
-      (myUserId && resUserId === myUserId)
+    return Boolean(
+      (myUserId && resUserId === myUserId) ||
+        (myCharName &&
+          resChar &&
+          (resChar === myCharName ||
+            canonicalResChar === myCharName ||
+            resChar === myCanonicalChar ||
+            canonicalResChar === myCanonicalChar))
     );
-  });
+  };
 
-  const sharedReservations = reservations.filter(res => {
-    const resUserId = res.userUid || '';
-    const resChar = res.charName?.trim() || '';
-    if (!resUserId || resUserId === myUserId || !resChar || !res.isOccupied) return false;
+  const deduplicateAndSortHunts = (list: Reservation[]): Reservation[] => {
+    const map = new Map<string, Reservation>();
+    for (const item of list) {
+      const canonical = resolveAgendaCanonicalReservation(item);
+      const key = getReservationDedupeKey(canonical);
+      if (!map.has(key)) {
+        map.set(key, canonical);
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => parseDayStartTime(a.timeSlot) - parseDayStartTime(b.timeSlot)
+    );
+  };
 
-    const explicitlyInHuntParty = res.partyMemberUids?.includes(myUserId);
-    const ownerProfile = usersList.find(u => u.uid === resUserId);
-    const ownerSharedWithMe = ownerProfile?.sharedWith?.includes(myUserId);
+  const myReservations = deduplicateAndSortHunts(reservations.filter(isOwnedReservation));
+  const myReservationKeys = new Set(myReservations.map(r => getReservationDedupeKey(r)));
 
-    return Boolean(explicitlyInHuntParty || ownerSharedWithMe);
-  });
+  const sharedReservations = deduplicateAndSortHunts(
+    reservations.filter(res => {
+      if (res.isOccupied === false) return false;
+      if (isOwnedReservation(res)) return false;
+      const key = getReservationDedupeKey(resolveAgendaCanonicalReservation(res));
+      if (myReservationKeys.has(key)) return false;
+
+      const resUserId = res.userUid || '';
+      const resChar = res.charName?.trim() || '';
+      if (!resChar) return false;
+
+      const explicitlyInHuntParty = Boolean(myUserId && res.partyMemberUids?.includes(myUserId));
+      const canonicalResChar = getCanonicalPlayerName(resChar).toLowerCase();
+      const ownerProfile = usersList.find(
+        u =>
+          (resUserId && u.uid === resUserId) ||
+          (u.charName &&
+            (u.charName.trim().toLowerCase() === resChar.toLowerCase() ||
+              getCanonicalPlayerName(u.charName).toLowerCase() === canonicalResChar))
+      );
+      const ownerSharedWithMe = Boolean(myUserId && ownerProfile?.sharedWith?.includes(myUserId));
+
+      return Boolean(explicitlyInHuntParty || ownerSharedWithMe);
+    })
+  );
 
   const filteredMyByDay = myReservations.filter(res => res.day === selectedDay);
   const filteredSharedByDay = sharedReservations.filter(res => res.day === selectedDay);
@@ -831,7 +882,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                       <div className="font-bold text-slate-700 dark:text-slate-300">{res.charName}</div>
                       <div className="text-[10px] text-slate-400 font-mono">Toque p/ Party</div>
                     </div>
-                    {((userProfile?.charName && (res.charName?.trim().toLowerCase() === userProfile.charName.trim().toLowerCase() || getCanonicalPlayerName(res.charName).toLowerCase() === userProfile.charName.trim().toLowerCase())) || res.userUid === userProfile?.uid || userProfile?.rank === 'Leader' || userProfile?.isAdmin) && (
+                    {(isOwnedReservation(res) || userProfile?.rank === 'Leader' || userProfile?.isAdmin) && (
                       <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:gap-1.5 sm:flex-wrap sm:justify-end w-full sm:w-auto">
                         <button
                           type="button"

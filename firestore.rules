@@ -71,6 +71,27 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function matchesUserCharOrAlias(storedName, userCharName) {
+      return storedName is string &&
+        userCharName is string &&
+        (storedName.lower() == userCharName.lower() ||
+         (storedName.lower() == 'exalted ragha' && userCharName.lower() == 'ragha healer') ||
+         (storedName.lower() == 'ragha healer' && userCharName.lower() == 'exalted ragha'));
+    }
+
+    function isFixedSlotOwnedBySignedInUser(reservationId) {
+      return isWhitelisted() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        exists(/databases/$(database)/documents/reservations/$(reservationId)) &&
+        get(/databases/$(database)/documents/reservations/$(reservationId)).data.userUid is string &&
+        get(/databases/$(database)/documents/reservations/$(reservationId)).data.userUid.matches('^fixed-.*') &&
+        exists(/databases/$(database)/documents/reservation_details/$(reservationId)) &&
+        matchesUserCharOrAlias(
+          get(/databases/$(database)/documents/reservation_details/$(reservationId)).data.charName,
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.charName
+        );
+    }
+
     function isValidId(id) {
       return id is string &&
         id.size() >= 1 &&
@@ -358,21 +379,31 @@ service cloud.firestore {
         isValidReservationSlot(incoming(), reservationId) &&
         (isAdmin() ||
          (isLeader() && existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid) ||
-         (isOwner(existing().userUid) && incoming().diff(existing()).affectedKeys().hasOnly(['isPublicVisibility'])));
+         ((isOwner(existing().userUid) || isFixedSlotOwnedBySignedInUser(reservationId)) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['isPublicVisibility'])));
       allow delete: if isWhitelisted() &&
         isValidId(reservationId) &&
-        (isAdmin() || (resource != null && existing().userUid == request.auth.uid));
+        (isAdmin() || (resource != null && (existing().userUid == request.auth.uid || isFixedSlotOwnedBySignedInUser(reservationId))));
     }
 
     // Sensitive Reservation Details (Character Name, Party Members, Notes)
     match /reservation_details/{reservationId} {
-      allow get, list: if isWhitelisted() && (
+      allow list: if isWhitelisted() && (
         isAdmin() ||
         existing().userUid == request.auth.uid ||
         existing().isPublicVisibility == true ||
         request.auth.uid in existing().partyMemberUids ||
         request.auth.uid in existing().sharedViewerUids ||
         'all' in existing().sharedViewerUids
+      );
+      allow get: if isWhitelisted() && isValidId(reservationId) && (
+        isAdmin() ||
+        existing().userUid == request.auth.uid ||
+        existing().isPublicVisibility == true ||
+        request.auth.uid in existing().partyMemberUids ||
+        request.auth.uid in existing().sharedViewerUids ||
+        'all' in existing().sharedViewerUids ||
+        isFixedSlotOwnedBySignedInUser(reservationId)
       );
       allow create: if isWhitelisted() &&
         isValidId(reservationId) &&
@@ -385,12 +416,13 @@ service cloud.firestore {
         isValidReservationDetails(incoming(), reservationId) &&
         (isAdmin() ||
          (isLeader() && existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid) ||
-         (isOwner(existing().userUid) && incoming().diff(existing()).affectedKeys().hasOnly([
-           'isPublicVisibility', 'partyMembers', 'partyMemberUids', 'sharedViewerUids', 'notes', 'updatedAt'
-         ])));
+         ((isOwner(existing().userUid) || isFixedSlotOwnedBySignedInUser(reservationId)) &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'isPublicVisibility', 'partyMembers', 'partyMemberUids', 'sharedViewerUids', 'notes', 'updatedAt'
+          ])));
       allow delete: if isWhitelisted() &&
         isValidId(reservationId) &&
-        (isAdmin() || (resource != null && existing().userUid == request.auth.uid));
+        (isAdmin() || (resource != null && (existing().userUid == request.auth.uid || isFixedSlotOwnedBySignedInUser(reservationId))));
     }
 
     // Global Settings (e.g. double_xp, system_status)

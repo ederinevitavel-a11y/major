@@ -17,7 +17,15 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { AllowedEmail, Reservation, ReservationSlot, ReservationDetails, UserProfile, MemberDirectoryProfile, HuntDay, DoubleXpSettings, DoubleXpRecord, CustomRespawn, ReleasedRespawn, LfgPost, SpecialRespawnsBackup } from '../types';
-import { SUPER_ADMIN_EMAIL, parseSlotRange, PLANILHADOS_RESPAWNS, THREE_HOUR_RESPAWNS } from '../constants/guildData';
+import {
+  SUPER_ADMIN_EMAIL,
+  parseSlotRange,
+  PLANILHADOS_RESPAWNS,
+  THREE_HOUR_RESPAWNS,
+  resolveAgendaCanonicalReservation,
+  getReservationDedupeKey,
+  getCanonicalPlayerName,
+} from '../constants/guildData';
 import { DEFAULT_FIXED_SCHEDULE } from '../constants/defaultSchedule';
 
 // ---- ALLOWED EMAILS ----
@@ -379,15 +387,19 @@ export function subscribeToReservations(
   currentUserUid: string | null | undefined,
   isAdmin: boolean,
   callback: (reservations: Reservation[]) => void,
-  onError?: (err: unknown) => void
+  onError?: (err: unknown) => void,
+  currentUserCharName?: string | null
 ): Unsubscribe {
   let slotsList: ReservationSlot[] = [];
   let deletedFixedIds = new Set<string>();
   const ownDetailsMap = new Map<string, ReservationDetails>();
+  const fixedOwnDetailsMap = new Map<string, ReservationDetails>();
+  const attemptedFixedDetailGets = new Set<string>();
   const publicDetailsMap = new Map<string, ReservationDetails>();
   const partyDetailsMap = new Map<string, ReservationDetails>();
   const sharedDetailsMap = new Map<string, ReservationDetails>();
   const detailsMap = new Map<string, ReservationDetails>();
+  let isDisposed = false;
   let unsubDetails: Unsubscribe | null = null;
   let unsubPublicDetails: Unsubscribe | null = null;
   let unsubPartyDetails: Unsubscribe | null = null;
@@ -398,14 +410,43 @@ export function subscribeToReservations(
     publicDetailsMap.forEach((v, k) => detailsMap.set(k, v));
     sharedDetailsMap.forEach((v, k) => detailsMap.set(k, v));
     partyDetailsMap.forEach((v, k) => detailsMap.set(k, v));
+    fixedOwnDetailsMap.forEach((v, k) => detailsMap.set(k, v));
     ownDetailsMap.forEach((v, k) => detailsMap.set(k, v));
   };
 
+  const defaultFixedById = new Map<string, Reservation>();
+  const defaultFixedByKey = new Map<string, Reservation>();
+  DEFAULT_FIXED_SCHEDULE.forEach(fixed => {
+    const canonicalFixed = resolveAgendaCanonicalReservation({
+      ...fixed,
+      partyMemberUids: [],
+    });
+    defaultFixedById.set(canonicalFixed.id, canonicalFixed);
+    defaultFixedByKey.set(getReservationDedupeKey(canonicalFixed), canonicalFixed);
+  });
+
   const emit = () => {
     const getCleanName = (name: string) => (name || '').replace(/^[A-Z0-9]+\s*—\s*/, '');
+    const myCleanChar = (currentUserCharName || '').trim().toLowerCase();
+    const myCanonicalChar = currentUserCharName
+      ? getCanonicalPlayerName(currentUserCharName).toLowerCase()
+      : '';
 
-    // Ignore legacy Forgotten Crypt normal/20:40h-23:00h reservations so 22:00h-00:20h stays free
+    const matchesCurrentUserChar = (candidateName?: string | null): boolean => {
+      if (!myCleanChar || !candidateName) return false;
+      const clean = candidateName.trim().toLowerCase();
+      const canonical = getCanonicalPlayerName(candidateName).toLowerCase();
+      return (
+        clean === myCleanChar ||
+        canonical === myCleanChar ||
+        clean === myCanonicalChar ||
+        canonical === myCanonicalChar
+      );
+    };
+
+    // Ignore legacy / non-occupied slots so Agenda and My Controls match 1:1
     const activeSlotsList = slotsList.filter(s => {
+      if (s.isOccupied === false) return false;
       const cleanRespawn = getCleanName(s.respawnName).trim().toLowerCase();
       if (s.id.startsWith('fixed-ab1-prezord')) return false;
       if (cleanRespawn === 'forgotten crypt') {
@@ -426,57 +467,119 @@ export function subscribeToReservations(
       return true;
     });
 
-    const firestoreKeySet = new Set(
-      activeSlotsList.flatMap(s => [
-        s.id,
-        `${s.day}_${getCleanName(s.respawnName)}_${s.timeSlot}`,
-        `${s.day}_${s.slotType}_${getCleanName(s.respawnName)}_${s.timeSlot}`,
-      ])
-    );
-
-    const fixedNotOverridden: Reservation[] = DEFAULT_FIXED_SCHEDULE.filter(
-      fixed =>
-        !deletedFixedIds.has(fixed.id) &&
-        !firestoreKeySet.has(fixed.id) &&
-        !firestoreKeySet.has(`${fixed.day}_${getCleanName(fixed.respawnName)}_${fixed.timeSlot}`) &&
-        !firestoreKeySet.has(`${fixed.day}_${fixed.slotType}_${getCleanName(fixed.respawnName)}_${fixed.timeSlot}`)
-    ).map(fixed => ({
-      ...fixed,
-      partyMemberUids: [],
-    }));
-
     const firestoreMerged: Reservation[] = activeSlotsList.map(slot => {
-      const isOwner = Boolean(currentUserUid && slot.userUid === currentUserUid);
-      const detail = detailsMap.get(slot.id);
-      const canSee = isAdmin || isOwner || Boolean(detail);
+      const canonicalSlotKey = getReservationDedupeKey(
+        resolveAgendaCanonicalReservation({
+          ...slot,
+          respawnName: getCleanName(slot.respawnName),
+          charName: '',
+        })
+      );
+      const matchedDefaultFixed =
+        defaultFixedById.get(slot.id) || defaultFixedByKey.get(canonicalSlotKey);
+      const isFixedMatchedByChar = Boolean(
+        !isAdmin &&
+          currentUserUid &&
+          slot.userUid?.startsWith('fixed-') &&
+          matchedDefaultFixed &&
+          matchesCurrentUserChar(matchedDefaultFixed.charName)
+      );
 
-      return {
+      if (
+        isFixedMatchedByChar &&
+        !fixedOwnDetailsMap.has(slot.id) &&
+        !attemptedFixedDetailGets.has(slot.id)
+      ) {
+        attemptedFixedDetailGets.add(slot.id);
+        getDoc(doc(db, 'reservation_details', slot.id))
+          .then(snap => {
+            if (!isDisposed && snap.exists()) {
+              fixedOwnDetailsMap.set(slot.id, {
+                id: snap.id,
+                ...(snap.data() as Omit<ReservationDetails, 'id'>),
+              });
+              rebuildDetailsMap();
+              emit();
+            }
+          })
+          .catch(() => {
+            // Silently ignore if detail doc doesn't exist or rules deny access
+          });
+      }
+
+      const detail = detailsMap.get(slot.id);
+      const isOwner = Boolean(
+        currentUserUid && (slot.userUid === currentUserUid || isFixedMatchedByChar)
+      );
+      const canSee = isAdmin || isOwner || Boolean(detail);
+      const fallbackFixed = isFixedMatchedByChar ? matchedDefaultFixed : undefined;
+
+      const merged: Reservation = {
         ...slot,
+        userUid:
+          isFixedMatchedByChar && currentUserUid ? currentUserUid : slot.userUid,
         respawnName: getCleanName(slot.respawnName),
         isPublicVisibility: slot.isPublicVisibility || detail?.isPublicVisibility || false,
-        partyMemberUids: detail?.partyMemberUids || (slot as unknown as { partyMemberUids?: string[] }).partyMemberUids || [],
+        partyMemberUids:
+          detail?.partyMemberUids ||
+          (slot as unknown as { partyMemberUids?: string[] }).partyMemberUids ||
+          [],
         // Strict Zero-Knowledge: regular members NEVER receive other players' character names, party, or notes unless visibility is granted!
         charName: canSee
-          ? (detail?.charName || (slot as unknown as { charName?: string }).charName || '')
+          ? detail?.charName ||
+            (slot as unknown as { charName?: string }).charName ||
+            fallbackFixed?.charName ||
+            ''
           : '',
         userRank: canSee
-          ? (detail?.userRank || (slot as unknown as { userRank?: Reservation['userRank'] }).userRank || 'Member')
+          ? detail?.userRank ||
+            (slot as unknown as { userRank?: Reservation['userRank'] }).userRank ||
+            fallbackFixed?.userRank ||
+            'Member'
           : undefined,
         partyMembers: canSee
-          ? (detail?.partyMembers || (slot as unknown as { partyMembers?: string }).partyMembers)
+          ? detail?.partyMembers ||
+            (slot as unknown as { partyMembers?: string }).partyMembers ||
+            fallbackFixed?.partyMembers
           : undefined,
         notes: canSee
-          ? (detail?.notes || (slot as unknown as { notes?: string }).notes)
+          ? detail?.notes ||
+            (slot as unknown as { notes?: string }).notes ||
+            fallbackFixed?.notes
           : undefined,
       };
+
+      return resolveAgendaCanonicalReservation(merged);
     });
 
-    // Deduplicate merged list by unique key (day + respawn + timeSlot)
+    const firestoreIdSet = new Set(firestoreMerged.map(s => s.id));
+    const firestoreDedupeSet = new Set(firestoreMerged.map(s => getReservationDedupeKey(s)));
+
+    const fixedNotOverridden: Reservation[] = DEFAULT_FIXED_SCHEDULE.map(fixed => {
+      const canonicalFixed = resolveAgendaCanonicalReservation({
+        ...fixed,
+        partyMemberUids: [],
+      });
+      if (currentUserUid && matchesCurrentUserChar(canonicalFixed.charName)) {
+        return {
+          ...canonicalFixed,
+          userUid: currentUserUid,
+        };
+      }
+      return canonicalFixed;
+    }).filter(
+      fixed =>
+        !deletedFixedIds.has(fixed.id) &&
+        !firestoreIdSet.has(fixed.id) &&
+        !firestoreDedupeSet.has(getReservationDedupeKey(fixed))
+    );
+
+    // Deduplicate merged list strictly by Agenda standard (day + canonical respawn + time range)
     const seenKeys = new Set<string>();
     const deduplicatedResult: Reservation[] = [];
 
     for (const item of [...firestoreMerged, ...fixedNotOverridden]) {
-      const key = `${item.day}_${getCleanName(item.respawnName)}_${item.timeSlot}`;
+      const key = getReservationDedupeKey(item);
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
         deduplicatedResult.push(item);
@@ -602,6 +705,7 @@ export function subscribeToReservations(
   }
 
   return () => {
+    isDisposed = true;
     unsubSlots();
     unsubDeletedFixed();
     if (unsubDetails) unsubDetails();
@@ -1383,7 +1487,23 @@ export async function restoreSpecialRespawnsBackup(
       await batch.commit();
     }
 
-    // 2. Restore backed-up special reservations split cleanly into zero-knowledge public/private collections
+    // 2. Resolve registered user UIDs by character name so restored reservations immediately bind to real accounts
+    const memberSnap = await getDocs(collection(db, 'member_directory'));
+    const userByChar = new Map<string, { uid: string; rank?: Reservation['userRank']; sharedWith?: string[] }>();
+    memberSnap.docs.forEach(d => {
+      const data = d.data() as Partial<MemberDirectoryProfile>;
+      if (data.charName) {
+        const entry = {
+          uid: data.uid || d.id,
+          rank: data.rank,
+          sharedWith: Array.isArray(data.sharedWith) ? data.sharedWith : [],
+        };
+        userByChar.set(data.charName.trim().toLowerCase(), entry);
+        userByChar.set(getCanonicalPlayerName(data.charName).toLowerCase(), entry);
+      }
+    });
+
+    // 3. Restore backed-up special reservations split cleanly into zero-knowledge public/private collections
     const validReservations = reservationsToRestore.filter(
       r => r && r.id && r.day && r.respawnName && r.timeSlot
     );
@@ -1394,13 +1514,21 @@ export async function restoreSpecialRespawnsBackup(
       const batch = writeBatch(db);
 
       chunk.forEach(r => {
+        const cleanChar = (r.charName || '').trim().toLowerCase();
+        const canonicalChar = getCanonicalPlayerName(r.charName || '').toLowerCase();
+        const matchedMember = userByChar.get(cleanChar) || userByChar.get(canonicalChar);
+        const resolvedUid =
+          matchedMember?.uid ||
+          r.userUid ||
+          `fixed-${(r.charName || 'player').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+
         const publicSlot: Record<string, unknown> = {
           id: r.id,
           day: r.day,
           slotType: r.slotType || 'planilhados',
           timeSlot: r.timeSlot,
           respawnName: r.respawnName,
-          userUid: r.userUid || `fixed-${(r.charName || 'player').toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+          userUid: resolvedUid,
           isOccupied: true,
           isPublicVisibility: r.isPublicVisibility ?? false,
           partyMemberUids: r.partyMemberUids || [],
@@ -1410,11 +1538,14 @@ export async function restoreSpecialRespawnsBackup(
         const privateDetails: Record<string, unknown> = {
           id: r.id,
           charName: r.charName || '',
-          userUid: publicSlot.userUid,
-          userRank: r.userRank || 'Member',
+          userUid: resolvedUid,
+          userRank: matchedMember?.rank || r.userRank || 'Member',
           partyMembers: r.partyMembers || '',
           partyMemberUids: r.partyMemberUids || [],
-          sharedViewerUids: r.sharedViewerUids || [],
+          sharedViewerUids:
+            r.sharedViewerUids && r.sharedViewerUids.length > 0
+              ? r.sharedViewerUids
+              : matchedMember?.sharedWith || [],
           isPublicVisibility: r.isPublicVisibility ?? false,
           notes: r.notes || '',
           createdAt: r.reservedAt || new Date().toISOString(),
@@ -1464,6 +1595,72 @@ export async function restoreSpecialRespawnsBackup(
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }
+}
+
+// Reconcile existing Firestore fixed-* reservations so they carry the player's real Firebase UID
+export async function reconcileFixedReservationsWithUsers(
+  reservationsList: Reservation[],
+  usersList: UserProfile[]
+): Promise<number> {
+  if (!reservationsList.length || !usersList.length) return 0;
+
+  const userByChar = new Map<string, UserProfile>();
+  usersList.forEach(u => {
+    if (u.charName && u.uid) {
+      userByChar.set(u.charName.trim().toLowerCase(), u);
+      userByChar.set(getCanonicalPlayerName(u.charName).toLowerCase(), u);
+    }
+  });
+
+  const candidates = reservationsList.filter(r => {
+    if (!r.id || !r.userUid?.startsWith('fixed-') || !r.charName) return false;
+    const c = r.charName.trim().toLowerCase();
+    const canon = getCanonicalPlayerName(r.charName).toLowerCase();
+    return Boolean(userByChar.get(c) || userByChar.get(canon));
+  });
+
+  if (candidates.length === 0) return 0;
+
+  let updated = 0;
+  for (const r of candidates) {
+    try {
+      const charName = (r.charName || '').trim();
+      if (!charName) continue;
+      const matched =
+        userByChar.get(charName.toLowerCase()) ||
+        userByChar.get(getCanonicalPlayerName(charName).toLowerCase());
+      if (!matched) continue;
+
+      const [slotSnap, detailSnap] = await Promise.all([
+        getDoc(doc(db, 'reservations', r.id)),
+        getDoc(doc(db, 'reservation_details', r.id)),
+      ]);
+
+      if (!slotSnap.exists() && !detailSnap.exists()) continue;
+
+      const batch = writeBatch(db);
+      if (slotSnap.exists() && slotSnap.data()?.userUid !== matched.uid) {
+        batch.update(doc(db, 'reservations', r.id), { userUid: matched.uid });
+      }
+      if (detailSnap.exists()) {
+        batch.update(doc(db, 'reservation_details', r.id), {
+          userUid: matched.uid,
+          userRank: matched.rank || r.userRank || 'Member',
+          sharedViewerUids:
+            Array.isArray(matched.sharedWith) && matched.sharedWith.length > 0
+              ? matched.sharedWith
+              : detailSnap.data()?.sharedViewerUids || [],
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      await batch.commit();
+      updated += 1;
+    } catch {
+      // ignore individual doc errors
+    }
+  }
+
+  return updated;
 }
 
 

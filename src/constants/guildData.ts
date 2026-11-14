@@ -327,3 +327,147 @@ export const SPECIAL_SCHEDULE_PLAYERS: SpecialPlayerRosterItem[] = [
   { charName: 'Urrk', respawnsSummary: 'Monster Graveyard Esquerda (16:00–18:00 Dom, 19:00–21:30 Sex)', suggestedRank: 'Challenger' },
   { charName: 'Xbloodyx', respawnsSummary: 'Gloom Pillars (21:00–23:00 Sáb/Dom, 22:30–01:00 Sex)', suggestedRank: 'Leader' },
 ];
+
+export const normalizeRespawnName = (name?: string): string =>
+  (name || '')
+    .replace(/^[A-Z0-9]+\s*—\s*/i, '')
+    .replace(/[()]/g, '')
+    .replace(/\bcore\b/gi, '')
+    .replace(/\bpolls\b/gi, 'pools')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+export const normalizeSlotString = (slot?: string): string =>
+  (slot || '').replace(/[\s–\-—]/g, '').toLowerCase();
+
+export const extractReservationTimeCandidate = (res: {
+  timeSlot?: string;
+  exactTime?: string;
+  notes?: string;
+}): string => {
+  if (res.exactTime) return res.exactTime;
+  const planMatch = res.notes?.match(
+    /Horário Planilhado:\s*([^\s(]+(?:\s*[–\-]\s*[^\s(]+)?)/i
+  );
+  if (planMatch?.[1]) return planMatch[1];
+  return res.timeSlot || '';
+};
+
+export const doesSlotMatchAgenda = (
+  res: { respawnName?: string; timeSlot?: string; exactTime?: string; notes?: string },
+  targetRespawn: string,
+  targetTime: string
+): boolean => {
+  const rNorm = normalizeRespawnName(res.respawnName);
+  const tNorm = normalizeRespawnName(targetRespawn);
+  if (!rNorm || !tNorm) return false;
+  if (rNorm !== tNorm && !rNorm.includes(tNorm) && !tNorm.includes(rNorm)) {
+    return false;
+  }
+
+  const targetNormStr = normalizeSlotString(targetTime);
+  if (normalizeSlotString(res.timeSlot) === targetNormStr) return true;
+  if (res.exactTime && normalizeSlotString(res.exactTime) === targetNormStr) return true;
+
+  if (res.notes) {
+    const notesMatch = res.notes.match(/(\d{1,2}:\d{2})\s*(?:–|-|às|as|\s)\s*(\d{1,2}:\d{2})/i);
+    if (notesMatch) {
+      const notesSlot = `${notesMatch[1]}h – ${notesMatch[2]}h`;
+      if (normalizeSlotString(notesSlot) === targetNormStr) return true;
+    }
+  }
+
+  const targetRange = parseSlotRange(targetTime);
+  const resRange = parseSlotRange(extractReservationTimeCandidate(res));
+  if (targetRange.start > 0 && resRange.start > 0) {
+    if (targetRange.start === resRange.start && targetRange.end === resRange.end) {
+      return true;
+    }
+    const overlapStart = Math.max(targetRange.start, resRange.start);
+    const overlapEnd = Math.min(targetRange.end, resRange.end);
+    if (overlapEnd - overlapStart >= 20) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export const resolveAgendaCanonicalReservation = <
+  T extends {
+    day: HuntDay;
+    slotType?: SlotType;
+    respawnName: string;
+    timeSlot: string;
+    exactTime?: string;
+    notes?: string;
+  }
+>(
+  res: T
+): T => {
+  const rNorm = normalizeRespawnName(res.respawnName);
+
+  const matchedPlanRespawn = PLANILHADOS_RESPAWNS.find(p => normalizeRespawnName(p) === rNorm);
+  if (matchedPlanRespawn) {
+    const daySlots = getPlanilhadoAllTimeSlots(matchedPlanRespawn, res.day);
+    const candidateStr = extractReservationTimeCandidate(res);
+    const candidateRange = parseSlotRange(candidateStr);
+
+    const exactMatchedSlot =
+      daySlots.find(s => normalizeSlotString(s) === normalizeSlotString(res.timeSlot)) ||
+      (res.exactTime && daySlots.find(s => normalizeSlotString(s) === normalizeSlotString(res.exactTime))) ||
+      daySlots.find(s => {
+        const sr = parseSlotRange(s);
+        return sr.start > 0 && sr.start === candidateRange.start && sr.end === candidateRange.end;
+      }) ||
+      daySlots.find(s => doesSlotMatchAgenda(res, matchedPlanRespawn, s));
+
+    return {
+      ...res,
+      respawnName: matchedPlanRespawn,
+      slotType: 'planilhados' as SlotType,
+      timeSlot: exactMatchedSlot || res.timeSlot,
+    };
+  }
+
+  const matchedNormalRespawn = NORMAL_RESPAWNS.find(p => normalizeRespawnName(p) === rNorm);
+  if (matchedNormalRespawn) {
+    const candidateRange = parseSlotRange(extractReservationTimeCandidate(res));
+    const exactNormalSlot =
+      NORMAL_TIME_SLOTS.find(s => normalizeSlotString(s) === normalizeSlotString(res.timeSlot)) ||
+      NORMAL_TIME_SLOTS.find(s => {
+        const sr = parseSlotRange(s);
+        return sr.start > 0 && sr.start === candidateRange.start && sr.end === candidateRange.end;
+      });
+
+    return {
+      ...res,
+      respawnName: matchedNormalRespawn,
+      slotType: res.slotType === '3h' ? '3h' : ('normal' as SlotType),
+      timeSlot: exactNormalSlot || res.timeSlot,
+    };
+  }
+
+  return {
+    ...res,
+    respawnName: (res.respawnName || '').replace(/^[A-Z0-9]+\s*—\s*/i, '').trim(),
+  };
+};
+
+export const getReservationDedupeKey = (res: {
+  day: HuntDay;
+  respawnName: string;
+  timeSlot: string;
+  exactTime?: string;
+  notes?: string;
+}): string => {
+  const normRespawn = normalizeRespawnName(res.respawnName);
+  const range = parseSlotRange(res.timeSlot || extractReservationTimeCandidate(res));
+  const timeKey =
+    range.start > 0 && range.end > 0
+      ? `${range.start}-${range.end}`
+      : normalizeSlotString(res.timeSlot);
+  return `${res.day}|${normRespawn}|${timeKey}`;
+};
+

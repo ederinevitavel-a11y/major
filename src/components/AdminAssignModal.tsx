@@ -10,6 +10,9 @@ import {
   PLANILHADOS_SLOTS_MAP,
   PLANILHADOS_SLOTS_BY_DAY,
   RANK_METADATA,
+  getCanonicalPlayerName,
+  doesSlotMatchAgenda,
+  parseDayStartTime,
 } from '../constants/guildData';
 import { setReservation, deleteReservation, isUserOnline } from '../services/firestoreService';
 import {
@@ -133,13 +136,25 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
   // Existing reservations belonging to this target user
   const userReservations = useMemo(() => {
     if (!activeUser) return [];
-    return reservations.filter(r => r.userUid === activeUser.uid);
+    const targetName = activeUser.charName?.trim().toLowerCase() || '';
+    const targetCanonical = getCanonicalPlayerName(activeUser.charName).toLowerCase();
+    return reservations
+      .filter(r => {
+        if (r.userUid === activeUser.uid) return true;
+        if (targetName && r.charName) {
+          const rc = r.charName.trim().toLowerCase();
+          const rCanon = getCanonicalPlayerName(r.charName).toLowerCase();
+          return rc === targetName || rCanon === targetName || rc === targetCanonical || rCanon === targetCanonical;
+        }
+        return false;
+      })
+      .sort((a, b) => parseDayStartTime(a.timeSlot) - parseDayStartTime(b.timeSlot));
   }, [reservations, activeUser]);
 
-  // Check slot occupancy in real time
-  const getSlotOccupant = (day: HuntDay, type: SlotType, respawn: string, time: string) => {
+  // Check slot occupancy in real time using Agenda matching
+  const getSlotOccupant = (day: HuntDay, _type: SlotType, respawn: string, time: string) => {
     return reservations.find(
-      r => r.day === day && r.respawnName.toLowerCase() === respawn.toLowerCase() && r.timeSlot === time
+      r => r.day === day && doesSlotMatchAgenda(r, respawn, time)
     );
   };
 
@@ -181,12 +196,14 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
     setError(null);
 
     try {
-      const reservationId = `${selectedDay}_${selectedRespawn.replace(/[^a-zA-Z0-9]/g, '-')}_${finalTimeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
+      const reservationId =
+        currentSlotOccupant?.id ||
+        `${selectedDay}_${selectedRespawn.replace(/[^a-zA-Z0-9]/g, '-')}_${finalTimeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
 
       const newReservation: Reservation = {
         id: reservationId,
         day: selectedDay,
-        slotType: slotType === 'normal' ? 'normal' : 'planilhados',
+        slotType: currentSlotOccupant?.slotType || (slotType === 'normal' ? 'normal' : 'planilhados'),
         timeSlot: finalTimeSlot,
         respawnName: selectedRespawn,
         charName: activeUser.charName,
