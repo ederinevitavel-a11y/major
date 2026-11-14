@@ -444,6 +444,20 @@ export function subscribeToReservations(
       );
     };
 
+    const myFixedSlugSet = new Set<string>();
+    if (myCleanChar) {
+      const firstWord = myCleanChar.split(/\s+/)[0];
+      if (firstWord) myFixedSlugSet.add(`fixed-${firstWord}`);
+      myFixedSlugSet.add(`fixed-${myCleanChar.replace(/[^a-z0-9]/g, '-')}`);
+      myFixedSlugSet.add(`fixed-${myCleanChar.replace(/[^a-z0-9]/g, '')}`);
+    }
+    if (myCanonicalChar) {
+      const firstCanonical = myCanonicalChar.split(/\s+/)[0];
+      if (firstCanonical) myFixedSlugSet.add(`fixed-${firstCanonical}`);
+      myFixedSlugSet.add(`fixed-${myCanonicalChar.replace(/[^a-z0-9]/g, '-')}`);
+      myFixedSlugSet.add(`fixed-${myCanonicalChar.replace(/[^a-z0-9]/g, '')}`);
+    }
+
     // Ignore legacy / non-occupied slots so Agenda and My Controls match 1:1
     const activeSlotsList = slotsList.filter(s => {
       if (s.isOccupied === false) return false;
@@ -477,12 +491,17 @@ export function subscribeToReservations(
       );
       const matchedDefaultFixed =
         defaultFixedById.get(slot.id) || defaultFixedByKey.get(canonicalSlotKey);
+      const isFixedMatchedByDefault = Boolean(
+        matchedDefaultFixed && matchesCurrentUserChar(matchedDefaultFixed.charName)
+      );
+      const isFixedMatchedBySlug = Boolean(
+        slot.userUid && myFixedSlugSet.has(slot.userUid.trim().toLowerCase())
+      );
       const isFixedMatchedByChar = Boolean(
         !isAdmin &&
           currentUserUid &&
           slot.userUid?.startsWith('fixed-') &&
-          matchedDefaultFixed &&
-          matchesCurrentUserChar(matchedDefaultFixed.charName)
+          (isFixedMatchedByDefault || isFixedMatchedBySlug)
       );
 
       if (
@@ -508,16 +527,22 @@ export function subscribeToReservations(
       }
 
       const detail = detailsMap.get(slot.id);
+      const isVerifiedDetailOwner = Boolean(
+        detail && matchesCurrentUserChar(detail.charName)
+      );
       const isOwner = Boolean(
-        currentUserUid && (slot.userUid === currentUserUid || isFixedMatchedByChar)
+        currentUserUid &&
+          (slot.userUid === currentUserUid || isFixedMatchedByDefault || isVerifiedDetailOwner)
       );
       const canSee = isAdmin || isOwner || Boolean(detail);
-      const fallbackFixed = isFixedMatchedByChar ? matchedDefaultFixed : undefined;
+      const fallbackFixed = isFixedMatchedByDefault ? matchedDefaultFixed : undefined;
 
       const merged: Reservation = {
         ...slot,
         userUid:
-          isFixedMatchedByChar && currentUserUid ? currentUserUid : slot.userUid,
+          (isFixedMatchedByDefault || isVerifiedDetailOwner) && currentUserUid
+            ? currentUserUid
+            : slot.userUid,
         respawnName: getCleanName(slot.respawnName),
         isPublicVisibility: slot.isPublicVisibility || detail?.isPublicVisibility || false,
         partyMemberUids:

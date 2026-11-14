@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, UserProfile, LfgPost, HuntDay } from '../types';
-import { Calendar, Clock, MapPin, User, Shield, CheckCircle2, Users, Eye, Share2, Plus, X, UserPlus, Search, Settings, RefreshCw, Zap, Award, TrendingUp, UserCheck, Settings2, Trash2, AlertTriangle, Loader2, Swords, Phone, Pencil, MessageCircle, Flame, Lock } from 'lucide-react';
+import { Calendar, Clock, MapPin, User, Shield, CheckCircle2, Users, Eye, Share2, Plus, X, UserPlus, Search, Settings, RefreshCw, Zap, Award, TrendingUp, UserCheck, Settings2, Trash2, AlertTriangle, Loader2, Swords, Phone, Pencil, MessageCircle, Flame } from 'lucide-react';
 import {
   DAYS_CONFIG,
   RANK_METADATA,
@@ -9,7 +9,7 @@ import {
   resolveAgendaCanonicalReservation,
   getReservationDedupeKey,
 } from '../constants/guildData';
-import { updateUserProfile, addReleasedRespawn, deleteReservation, deleteLfgPost, updateReservationVisibility } from '../services/firestoreService';
+import { updateUserProfile, addReleasedRespawn, deleteReservation, deleteLfgPost } from '../services/firestoreService';
 import { fetchCharacter, TibiaCharacterInfo } from '../services/tibiaDataService';
 import { fetchCharacterHighscores } from '../services/missclickApi';
 import { useAuth } from '../context/AuthContext';
@@ -117,30 +117,6 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
       setTimeout(() => setShareToast(null), 4500);
     } finally {
       setIsReleasing(false);
-    }
-  };
-
-  const [updatingVisId, setUpdatingVisId] = useState<string | null>(null);
-
-  const handleToggleVisibility = async (res: Reservation) => {
-    if (!res.id) return;
-    setUpdatingVisId(res.id);
-    try {
-      const nextVal = !res.isPublicVisibility;
-      await updateReservationVisibility(res.id, nextVal);
-      res.isPublicVisibility = nextVal;
-      setShareToast(
-        nextVal
-          ? `Visibilidade liberada: Seu nome agora está visível para a guilda neste respawn.`
-          : `Visibilidade privada: Membros comuns agora veem apenas "Ocupado" com cadeado.`
-      );
-      setTimeout(() => setShareToast(null), 4500);
-    } catch (err) {
-      console.error('Erro ao alternar visibilidade:', err);
-      setShareToast('Erro ao atualizar visibilidade da reserva.');
-      setTimeout(() => setShareToast(null), 3000);
-    } finally {
-      setUpdatingVisId(null);
     }
   };
 
@@ -883,39 +859,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                       <div className="text-[10px] text-slate-400 font-mono">Toque p/ Party</div>
                     </div>
                     {(isOwnedReservation(res) || userProfile?.rank === 'Leader' || userProfile?.isAdmin) && (
-                      <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:gap-1.5 sm:flex-wrap sm:justify-end w-full sm:w-auto">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            handleToggleVisibility(res);
-                          }}
-                          disabled={updatingVisId === res.id}
-                          className={`min-h-[40px] sm:min-h-[32px] px-2.5 py-1.5 rounded-xl sm:rounded-lg text-[11px] sm:text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1 shrink-0 whitespace-nowrap ${
-                            res.isPublicVisibility
-                              ? 'bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900/90 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
-                              : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
-                          }`}
-                          title={
-                            res.isPublicVisibility
-                              ? 'Visível para a guilda. Clique para ocultar o seu nome (mostrar apenas Ocupado para membros).'
-                              : 'Privado para membros comuns (mostra apenas Ocupado com cadeado). Clique para liberar visibilidade do seu nome.'
-                          }
-                        >
-                          {res.isPublicVisibility ? (
-                            <>
-                              <Eye className="h-3.5 w-3.5 sm:h-3 sm:w-3 text-amber-600 dark:text-amber-400 shrink-0" />
-                              <span>Visível Guild</span>
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="h-3.5 w-3.5 sm:h-3 sm:w-3 text-slate-500 shrink-0" />
-                              <span>Privado</span>
-                            </>
-                          )}
-                        </button>
-
+                      <div className="flex items-center justify-end w-full sm:w-auto">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -923,7 +867,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                             e.preventDefault();
                             handleOpenReleaseConfirm(res);
                           }}
-                          className="min-h-[40px] sm:min-h-[32px] px-2.5 py-1.5 rounded-xl sm:rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] sm:text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1 shrink-0 whitespace-nowrap"
+                          className="w-full sm:w-auto min-h-[40px] sm:min-h-[32px] px-3 py-1.5 rounded-xl sm:rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] sm:text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1 shrink-0 whitespace-nowrap"
                           title="Liberar este respawn para a guild"
                         >
                           <Trash2 className="h-3.5 w-3.5 sm:h-3 sm:w-3 shrink-0" />
