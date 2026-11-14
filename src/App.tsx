@@ -19,7 +19,7 @@ import {
   getSystemStatus,
   updateSystemStatus,
   updateUserProfile,
-  getDoubleXpRecord,
+  getAllDoubleXpRecords,
   saveDoubleXpRecord,
   subscribeToCustomRespawns,
   subscribeToReleasedRespawns,
@@ -33,6 +33,7 @@ import {
   Sparkles,
   Lock,
   ArrowRight,
+  RefreshCw,
 } from 'lucide-react';
 
 const MainDashboard: React.FC = () => {
@@ -43,8 +44,10 @@ const MainDashboard: React.FC = () => {
     isAuthorized,
     isAdmin,
     needsCharacterLink,
+    profileLoadError,
     signInWithGoogle,
     signOut,
+    refreshProfile,
   } = useAuth();
 
   const [currentTab, setCurrentTab] = useState<MainTab>('schedule');
@@ -59,10 +62,12 @@ const MainDashboard: React.FC = () => {
 
   const hasSyncedDirectoryRef = useRef(false);
   const reconciledFixedIdsRef = useRef<Set<string>>(new Set());
+  const charNameRef = useRef<string | undefined>(userProfile?.charName);
+  charNameRef.current = userProfile?.charName;
 
-  // Security: Only administrators fetch full /users profiles (which contain emails/PII).
-  // Regular members only read the PII-free /member_directory collection.
+  // Users list is already kept in real time via onSnapshot; only fetch manually as a fallback if empty
   const refreshUsers = async () => {
+    if (usersList.length > 0) return;
     try {
       const list = isAdmin ? await getAllUserProfiles() : await getAllMemberDirectory();
       setUsersList(list);
@@ -72,7 +77,7 @@ const MainDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    if (loading || !currentUser || !isAuthorized) {
+    if (loading || !currentUser || !isAuthorized || needsCharacterLink || profileLoadError) {
       setUsersList([]);
       setCustomRespawns([]);
       setReleasedRespawns([]);
@@ -81,7 +86,7 @@ const MainDashboard: React.FC = () => {
       return;
     }
 
-    // Real-time subscription: Admins read /users and keep /member_directory synced;
+    // Real-time subscription: Admins read /users and keep /member_directory synced (throttled to 1x/24h);
     // Regular members read strictly from PII-free /member_directory.
     const unsubUsers = isAdmin
       ? subscribeToUserProfiles(
@@ -89,7 +94,11 @@ const MainDashboard: React.FC = () => {
             setUsersList(list);
             if (!hasSyncedDirectoryRef.current && list.length > 0) {
               hasSyncedDirectoryRef.current = true;
-              syncMemberDirectoryFromUsers(list).catch(() => {});
+              const lastBackfillAt = Number(localStorage.getItem('major_dir_backfill_at') || '0');
+              if (Date.now() - lastBackfillAt >= 24 * 60 * 60 * 1000) {
+                localStorage.setItem('major_dir_backfill_at', String(Date.now()));
+                syncMemberDirectoryFromUsers(list).catch(() => {});
+              }
             }
           },
           err => console.warn('Erro ao sincronizar membros:', err)
@@ -125,11 +134,11 @@ const MainDashboard: React.FC = () => {
       unsubReleased();
       unsubLfg();
     };
-  }, [loading, currentUser, isAuthorized, isAdmin]);
+  }, [loading, currentUser, isAuthorized, isAdmin, needsCharacterLink, profileLoadError]);
 
   // Automated daily 07:00 AM sync & XP capture check (Strictly Admin-only)
   useEffect(() => {
-    if (loading || !currentUser || !isAuthorized || !isAdmin) return;
+    if (loading || !currentUser || !isAuthorized || !isAdmin || needsCharacterLink || profileLoadError) return;
 
     const runDailyAutoSync = async () => {
       try {
@@ -138,8 +147,12 @@ const MainDashboard: React.FC = () => {
         if (currentHour < 7) return; // Only run at or after 07:00 AM
 
         const todayStr = now.toISOString().split('T')[0];
+        const sessionSyncKey = `major_auto_sync_checked_${todayStr}`;
+        if (sessionStorage.getItem(sessionSyncKey) === '1') return;
+
         const status = await getSystemStatus();
         if (status?.lastAutoSyncDate === todayStr) {
+          sessionStorage.setItem(sessionSyncKey, '1');
           return; // Already synced today
         }
 
@@ -162,13 +175,19 @@ const MainDashboard: React.FC = () => {
           }
         }
 
-        const users = await getAllUserProfiles();
+        const [users, existingXpRecords] = await Promise.all([
+          getAllUserProfiles(),
+          getAllDoubleXpRecords(),
+        ]);
+        const xpByUid = new Map(existingXpRecords.map(r => [r.uid, r]));
+
         for (const u of users) {
           if (!u.charName) continue;
           const cleanName = u.charName.trim().toLowerCase();
           let foundLevel = 0;
           let foundVocation = u.vocation;
           let foundRank = u.rank;
+          let fetchedCharInfo: Awaited<ReturnType<typeof fetchCharacter>> = null;
 
           const guildMatch = guildMemberMap.get(cleanName);
           if (guildMatch && guildMatch.level > 0) {
@@ -178,17 +197,20 @@ const MainDashboard: React.FC = () => {
               foundRank = mapTibiaRankToPriority(guildMatch.rank);
             }
           } else {
-            const charInfo = await fetchCharacter(u.charName);
-            if (charInfo && charInfo.level > 0) {
-              foundLevel = charInfo.level;
-              if (charInfo.vocation) foundVocation = charInfo.vocation;
-              if (charInfo.rank) {
-                foundRank = mapTibiaRankToPriority(charInfo.rank);
+            fetchedCharInfo = await fetchCharacter(u.charName);
+            if (fetchedCharInfo && fetchedCharInfo.level > 0) {
+              foundLevel = fetchedCharInfo.level;
+              if (fetchedCharInfo.vocation) foundVocation = fetchedCharInfo.vocation;
+              if (fetchedCharInfo.rank) {
+                foundRank = mapTibiaRankToPriority(fetchedCharInfo.rank);
               }
             }
           }
 
-          if (foundLevel > 0) {
+          if (
+            foundLevel > 0 &&
+            (foundLevel !== u.level || foundVocation !== u.vocation || foundRank !== u.rank)
+          ) {
             await updateUserProfile(u.uid, {
               level: foundLevel,
               vocation: foundVocation,
@@ -196,25 +218,28 @@ const MainDashboard: React.FC = () => {
             });
           }
 
-          const charInfo = await fetchCharacter(u.charName);
+          const charInfo = fetchedCharInfo ?? (await fetchCharacter(u.charName));
           if (charInfo) {
             const currentTotal = charInfo.experience;
-            const existing = await getDoubleXpRecord(u.uid);
-            const perDay = Math.floor(currentTotal / 3);
-            await saveDoubleXpRecord({
-              uid: u.uid,
-              charName: u.charName,
-              startExp: existing?.startExp ?? currentTotal,
-              fridayExp: existing?.fridayExp ?? perDay,
-              saturdayExp: existing?.saturdayExp ?? perDay,
-              sundayExp: existing?.sundayExp ?? (currentTotal - perDay * 2),
-              totalExp: currentTotal,
-              lastCapturedAt: new Date().toISOString(),
-            });
+            const existing = xpByUid.get(u.uid);
+            if (!existing || currentTotal !== existing.totalExp) {
+              const perDay = Math.floor(currentTotal / 3);
+              await saveDoubleXpRecord({
+                uid: u.uid,
+                charName: u.charName,
+                startExp: existing?.startExp ?? currentTotal,
+                fridayExp: existing?.fridayExp ?? perDay,
+                saturdayExp: existing?.saturdayExp ?? perDay,
+                sundayExp: existing?.sundayExp ?? (currentTotal - perDay * 2),
+                totalExp: currentTotal,
+                lastCapturedAt: new Date().toISOString(),
+              });
+            }
           }
         }
 
         await updateSystemStatus({ lastAutoSyncDate: todayStr });
+        sessionStorage.setItem(sessionSyncKey, '1');
         console.info('Atualização automática diária concluída com sucesso!');
       } catch (err) {
         console.warn('Erro na atualização automática diária:', err);
@@ -222,13 +247,13 @@ const MainDashboard: React.FC = () => {
     };
 
     runDailyAutoSync();
-  }, [loading, currentUser, isAuthorized, isAdmin]);
+  }, [loading, currentUser, isAuthorized, isAdmin, needsCharacterLink, profileLoadError]);
 
   // Subscribe to real-time reservations with zero-knowledge data privacy
   useEffect(() => {
-    if (loading || !currentUser || !isAuthorized) return;
+    if (loading || !currentUser || !isAuthorized || needsCharacterLink || profileLoadError) return;
 
-    // If administrator, run sanitation check to ensure any legacy reservations have their sensitive fields isolated
+    // If administrator, run one-time sanitation check (gated by marker doc + session cache)
     if (isAdmin) {
       import('./services/firestoreService').then(m => {
         m.sanitizeLegacyReservations().catch(err => console.warn('Legacy sanitization:', err));
@@ -242,14 +267,14 @@ const MainDashboard: React.FC = () => {
         setReservations(list);
       },
       undefined,
-      userProfile?.charName
+      () => charNameRef.current
     );
     return () => unsub();
-  }, [loading, currentUser, isAuthorized, isAdmin, userProfile?.charName]);
+  }, [loading, currentUser, isAuthorized, isAdmin, needsCharacterLink, profileLoadError]);
 
   // Admin auto-reconciliation: upgrade any stored fixed-* reservation docs to the player's real Firebase UID
   useEffect(() => {
-    if (loading || !currentUser || !isAuthorized || !isAdmin) return;
+    if (loading || !currentUser || !isAuthorized || !isAdmin || needsCharacterLink || profileLoadError) return;
     if (reservations.length === 0 || usersList.length === 0) return;
 
     const pending = reservations.filter(
@@ -460,6 +485,46 @@ const MainDashboard: React.FC = () => {
     );
   }
 
+  // Temporary profile read failure (e.g., transient quota/network) -> offer clean retry instead of FirstLoginModal
+  if (profileLoadError) {
+    const isQuotaErr = profileLoadError.toLowerCase().includes('quota');
+    return (
+      <div className="min-h-screen bg-[#F7F9FC] dark:bg-[#0B0F19] flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center">
+          <div className="h-14 w-14 rounded-2xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 flex items-center justify-center mx-auto mb-4">
+            <RefreshCw className="h-7 w-7" />
+          </div>
+
+          <h2 className="text-lg font-black text-slate-900 dark:text-white">
+            Não foi possível carregar seu perfil
+          </h2>
+
+          <p className="mt-2 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+            {isQuotaErr
+              ? 'O servidor do Firestore retornou limite de cota temporário. Se você acabou de atualizar o plano ou a cota acabou de liberar, tente novamente abaixo.'
+              : 'Ocorreu uma falha temporária de conexão com o Firestore ao buscar seus dados.'}
+          </p>
+
+          <div className="mt-6 flex flex-col gap-2">
+            <button
+              onClick={() => refreshProfile()}
+              className="w-full py-2.5 rounded-xl bg-[#2160FF] text-white text-xs font-bold hover:bg-blue-700 transition-all cursor-pointer inline-flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              <span>Tentar Novamente</span>
+            </button>
+            <button
+              onClick={() => signOut()}
+              className="w-full py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+            >
+              Sair da Conta
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Needs character link on first login
   if (needsCharacterLink) {
     return <FirstLoginModal />;
@@ -538,6 +603,7 @@ const MainDashboard: React.FC = () => {
             reservations={linkedReservations}
             onRefreshUsers={refreshUsers}
             customRespawns={customRespawns}
+            releasedRespawns={releasedRespawns}
           />
         )}
       </main>

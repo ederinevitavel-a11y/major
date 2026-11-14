@@ -57,14 +57,29 @@ export async function isEmailWhitelisted(email: string): Promise<boolean> {
 }
 
 export async function addAllowedEmail(email: string, role: 'admin' | 'member', addedBy: string, note?: string): Promise<void> {
-  const clean = email.trim().toLowerCase();
-  const path = `allowed_emails/${encodeURIComponent(clean)}`;
+  const clean = email
+    .replace(/[\u200B-\u200D\uFEFF\u00A0\s]/g, '')
+    .trim()
+    .toLowerCase();
+
+  if (!clean || clean.length < 3 || clean.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+    throw new Error('Formato de e-mail inválido.');
+  }
+
+  const encodedId = encodeURIComponent(clean);
+  if (encodedId.length > 128) {
+    throw new Error('O endereço de e-mail excede o limite de caracteres permitido.');
+  }
+
+  const safeAddedBy = (addedBy || 'admin').trim().slice(0, 120) || 'admin';
+  const safeNote = (note || '').trim().slice(0, 200);
+  const path = `allowed_emails/${encodedId}`;
   try {
-    await setDoc(doc(db, 'allowed_emails', encodeURIComponent(clean)), {
+    await setDoc(doc(db, 'allowed_emails', encodedId), {
       email: clean,
       role,
-      addedBy,
-      note: note || '',
+      addedBy: safeAddedBy,
+      note: safeNote,
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
@@ -210,7 +225,9 @@ export async function updateUserProfile(uid: string, updates: Partial<UserProfil
 
 export async function ensureMemberDirectoryEntry(profile: UserProfile): Promise<void> {
   if (!profile?.uid) return;
+  const cacheKey = `major_dir_synced_${profile.uid}`;
   try {
+    if (localStorage.getItem(cacheKey) === '1') return;
     const dirRef = doc(db, 'member_directory', profile.uid);
     const snap = await getDoc(dirRef);
     if (!snap.exists()) {
@@ -225,6 +242,7 @@ export async function ensureMemberDirectoryEntry(profile: UserProfile): Promise<
         updatedAt: new Date().toISOString(),
       }));
     }
+    localStorage.setItem(cacheKey, '1');
   } catch (err) {
     console.debug('Member directory sync notice:', err);
   }
@@ -354,8 +372,8 @@ export async function updateUserPresence(uid: string, isOnline: boolean = true):
   }
 }
 
-// Helper: Determine if a user is currently online in the app (default heartbeat window: 300 seconds / 5 minutes)
-export function isUserOnline(user: UserProfile | undefined | null, thresholdSeconds: number = 300): boolean {
+// Helper: Determine if a user is currently online in the app (default heartbeat window: 360 seconds / 6 minutes)
+export function isUserOnline(user: UserProfile | undefined | null, thresholdSeconds: number = 360): boolean {
   if (!user) return false;
   // If explicitly flagged offline
   if (user.isOnline === false) return false;
@@ -388,7 +406,7 @@ export function subscribeToReservations(
   isAdmin: boolean,
   callback: (reservations: Reservation[]) => void,
   onError?: (err: unknown) => void,
-  currentUserCharName?: string | null
+  currentUserCharName?: string | null | (() => string | null | undefined)
 ): Unsubscribe {
   let slotsList: ReservationSlot[] = [];
   let deletedFixedIds = new Set<string>();
@@ -427,9 +445,11 @@ export function subscribeToReservations(
 
   const emit = () => {
     const getCleanName = (name: string) => (name || '').replace(/^[A-Z0-9]+\s*—\s*/, '');
-    const myCleanChar = (currentUserCharName || '').trim().toLowerCase();
-    const myCanonicalChar = currentUserCharName
-      ? getCanonicalPlayerName(currentUserCharName).toLowerCase()
+    const resolvedCharName =
+      typeof currentUserCharName === 'function' ? currentUserCharName() : currentUserCharName;
+    const myCleanChar = (resolvedCharName || '').trim().toLowerCase();
+    const myCanonicalChar = resolvedCharName
+      ? getCanonicalPlayerName(resolvedCharName).toLowerCase()
       : '';
 
     const matchesCurrentUserChar = (candidateName?: string | null): boolean => {
@@ -506,6 +526,7 @@ export function subscribeToReservations(
 
       if (
         isFixedMatchedByChar &&
+        !detailsMap.has(slot.id) &&
         !fixedOwnDetailsMap.has(slot.id) &&
         !attemptedFixedDetailGets.has(slot.id)
       ) {
@@ -904,7 +925,19 @@ export async function clearAllReservations(dayFilter?: HuntDay): Promise<number>
 
 // One-time auto sanitizer for legacy reservations to guarantee no character names linger in the public collection
 export async function sanitizeLegacyReservations(): Promise<number> {
+  const sessionKey = 'major_legacy_sanitized_v2';
   try {
+    if (sessionStorage.getItem(sessionKey) === '1') {
+      return 0;
+    }
+
+    const doneMarkerRef = doc(db, 'settings', 'legacy_sanitization_v2');
+    const doneMarkerSnap = await getDoc(doneMarkerRef);
+    if (doneMarkerSnap.exists()) {
+      sessionStorage.setItem(sessionKey, '1');
+      return 0;
+    }
+
     const snap = await getDocs(collection(db, 'reservations'));
     let cleanedCount = 0;
     const batch = writeBatch(db);
@@ -1082,6 +1115,11 @@ export async function sanitizeLegacyReservations(): Promise<number> {
       }
     }
 
+    await setDoc(doneMarkerRef, {
+      completedAt: new Date().toISOString(),
+      cleanedCount,
+    });
+    sessionStorage.setItem(sessionKey, '1');
     return cleanedCount;
   } catch (err) {
     console.warn('Legacy reservations sanitization notice:', err);

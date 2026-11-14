@@ -9,8 +9,11 @@ import {
 import { auth, testConnection, db } from '../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import { UserProfile } from '../types';
-import { getUserProfile, isEmailWhitelisted, saveUserProfile, updateUserPresence, ensureMemberDirectoryEntry } from '../services/firestoreService';
+import { getUserProfile, saveUserProfile, updateUserPresence, ensureMemberDirectoryEntry } from '../services/firestoreService';
 import { SUPER_ADMIN_EMAIL } from '../constants/guildData';
+
+const PRESENCE_MIN_INTERVAL_MS = 210_000; // 3.5 minutes cooldown between presence writes
+const PRESENCE_HEARTBEAT_MS = 240_000; // 4 minutes active heartbeat interval
 
 interface AuthContextType {
   currentUser: User | null;
@@ -19,6 +22,7 @@ interface AuthContextType {
   isAuthorized: boolean;
   isAdmin: boolean;
   needsCharacterLink: boolean;
+  profileLoadError: string | null;
   darkMode: boolean;
   toggleDarkMode: () => void;
   signInWithGoogle: () => Promise<void>;
@@ -35,6 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [needsCharacterLink, setNeedsCharacterLink] = useState<boolean>(false);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('major_theme') === 'dark';
   });
@@ -57,13 +62,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     testConnection().catch(err => console.warn('Firestore test connection:', err));
   }, []);
 
-  const checkUserStatus = async (user: User | null) => {
+  const checkUserStatus = async (user: User | null, options?: { skipWhitelistCheck?: boolean }) => {
     if (!user || !user.email) {
       setCurrentUser(null);
       setUserProfile(null);
       setIsAuthorized(false);
       setIsAdmin(false);
       setNeedsCharacterLink(false);
+      setProfileLoadError(null);
       setLoading(false);
       return;
     }
@@ -71,23 +77,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const email = user.email.toLowerCase();
     const isSuper = email === SUPER_ADMIN_EMAIL.toLowerCase();
 
-    // Whitelist check
-    let authorized = isSuper;
-    let isEmailAdmin = isSuper;
-    if (!authorized) {
-      authorized = await isEmailWhitelisted(email);
-    }
+    // Single-read whitelist & role check (skip completely for Super Admin or authorized profile refresh)
+    let authorized = isSuper || Boolean(options?.skipWhitelistCheck && isAuthorized);
+    let isEmailAdmin = isSuper || Boolean(options?.skipWhitelistCheck && isAdmin);
 
-    try {
-      const emailDocSnap = await getDoc(doc(db, 'allowed_emails', encodeURIComponent(email)));
-      if (emailDocSnap.exists()) {
-        const data = emailDocSnap.data();
-        if (data.role === 'admin') {
-          isEmailAdmin = true;
+    if (!isSuper && !options?.skipWhitelistCheck) {
+      try {
+        const emailDocSnap = await getDoc(doc(db, 'allowed_emails', encodeURIComponent(email)));
+        if (emailDocSnap.exists()) {
+          authorized = true;
+          const data = emailDocSnap.data();
+          if (data.role === 'admin') {
+            isEmailAdmin = true;
+          }
         }
+      } catch (err) {
+        console.warn('Check whitelist notice:', err);
       }
-    } catch (err) {
-      console.warn('Check email admin role notice:', err);
     }
 
     if (!authorized) {
@@ -100,6 +106,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Profile check (resolve isAdmin and profile before flipping isAuthorized to true to avoid transient non-admin queries)
+    setProfileLoadError(null);
     try {
       let profile = await getUserProfile(user.uid);
       if (profile) {
@@ -122,19 +129,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUserProfile(profile);
         setIsAdmin(isSuper || isEmailAdmin || Boolean(profile.isAdmin));
         setNeedsCharacterLink(false);
+        setProfileLoadError(null);
         setIsAuthorized(true);
       } else {
         // Needs to link Tibia character
         setUserProfile(null);
         setIsAdmin(isSuper || isEmailAdmin);
         setNeedsCharacterLink(true);
+        setProfileLoadError(null);
         setIsAuthorized(true);
       }
     } catch (err) {
       console.error('Error fetching user profile:', err);
-      // If profile read failed, allow linking
+      const rawMsg = err instanceof Error ? err.message : String(err);
       setIsAdmin(isSuper || isEmailAdmin);
-      setNeedsCharacterLink(true);
+      setNeedsCharacterLink(false);
+      setProfileLoadError(rawMsg);
       setIsAuthorized(true);
     } finally {
       setLoading(false);
@@ -150,43 +160,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Presence heartbeat: keeps users/{uid} updated as online while app is active
+  // Presence heartbeat: throttled to keep Firestore writes & admin snapshot reads minimal
   useEffect(() => {
     if (!currentUser?.uid || !userProfile) return;
 
     const uid = currentUser.uid;
+    const storageKey = `major_presence_ping_${uid}`;
 
-    // Ping immediately as online
-    updateUserPresence(uid, true).catch(() => {});
+    const pingIfDue = () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      const lastLocalPing = Number(sessionStorage.getItem(storageKey) || '0');
+      if (now - lastLocalPing < PRESENCE_MIN_INTERVAL_MS) return;
 
-    // Heartbeat every 40 seconds
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        updateUserPresence(uid, true).catch(() => {});
-      }
-    }, 40000);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        updateUserPresence(uid, true).catch(() => {});
-      }
-    };
-    const handleFocus = () => {
+      sessionStorage.setItem(storageKey, String(now));
       updateUserPresence(uid, true).catch(() => {});
     };
-    const handleBeforeUnload = () => {
-      updateUserPresence(uid, false).catch(() => {});
-    };
 
-    window.addEventListener('focus', handleFocus);
+    // Only ping on mount if stored/profile timestamp is stale (> 3.5 min)
+    const storedPing = Number(sessionStorage.getItem(storageKey) || '0');
+    const profileLastSeen = userProfile.lastSeenAt || 0;
+    const latestKnown = Math.max(storedPing, userProfile.isOnline === false ? 0 : profileLastSeen);
+    if (Date.now() - latestKnown >= PRESENCE_MIN_INTERVAL_MS) {
+      sessionStorage.setItem(storageKey, String(Date.now()));
+      updateUserPresence(uid, true).catch(() => {});
+    } else if (latestKnown > storedPing) {
+      sessionStorage.setItem(storageKey, String(latestKnown));
+    }
+
+    const interval = setInterval(pingIfDue, PRESENCE_HEARTBEAT_MS);
+    const handleVisibility = () => pingIfDue();
+
+    window.addEventListener('focus', pingIfDue);
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('focus', pingIfDue);
       document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [currentUser?.uid, Boolean(userProfile)]);
 
@@ -206,6 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     try {
       if (currentUser?.uid) {
+        sessionStorage.removeItem(`major_presence_ping_${currentUser.uid}`);
         await updateUserPresence(currentUser.uid, false).catch(() => {});
       }
       await firebaseSignOut(auth);
@@ -214,6 +226,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAuthorized(false);
       setIsAdmin(false);
       setNeedsCharacterLink(false);
+      setProfileLoadError(null);
     } catch (error) {
       console.error('Erro ao sair:', error);
     }
@@ -221,7 +234,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshProfile = async () => {
     if (currentUser) {
-      await checkUserStatus(currentUser);
+      setLoading(true);
+      await checkUserStatus(currentUser, { skipWhitelistCheck: isAuthorized });
     }
   };
 
@@ -234,6 +248,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthorized,
         isAdmin,
         needsCharacterLink,
+        profileLoadError,
         darkMode,
         toggleDarkMode,
         signInWithGoogle,

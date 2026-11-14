@@ -9,7 +9,6 @@ import {
   isUserOnline,
   addCustomRespawn,
   removeCustomRespawn,
-  subscribeToReleasedRespawns,
   deleteReservation,
 } from '../services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from '../services/tibiaDataService';
@@ -56,6 +55,7 @@ interface AdminPanelProps {
   reservations: Reservation[];
   onRefreshUsers: () => Promise<void>;
   customRespawns?: CustomRespawn[];
+  releasedRespawns?: ReleasedRespawn[];
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -63,18 +63,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   reservations,
   onRefreshUsers,
   customRespawns = [],
+  releasedRespawns = [],
 }) => {
   const { currentUser } = useAuth();
   const [activeSubTab, setActiveSubTab] = useState<'assign' | 'emails' | 'apis' | 'released' | 'backup'>('assign');
-  const [releasedRespawnsList, setReleasedRespawnsList] = useState<ReleasedRespawn[]>([]);
+  const releasedRespawnsList = releasedRespawns;
   const [isExcelBackupOpen, setIsExcelBackupOpen] = useState(false);
-
-  useEffect(() => {
-    const unsub = subscribeToReleasedRespawns(list => {
-      setReleasedRespawnsList(list);
-    });
-    return () => unsub();
-  }, []);
 
   const [guildHighscoresData, setGuildHighscoresData] = useState<any>(null);
   const [loadingGuildHs, setLoadingGuildHs] = useState(false);
@@ -131,10 +125,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Allowed Emails State
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
+  const [emailsLoaded, setEmailsLoaded] = useState(false);
+  const [guildsChecked, setGuildsChecked] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<'admin' | 'member'>('member');
   const [newNote, setNewNote] = useState('');
   const [loadingEmails, setLoadingEmails] = useState(false);
+  const [addingEmail, setAddingEmail] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Custom respawn management state
   const [newHuntName, setNewHuntName] = useState('');
@@ -255,17 +253,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setLoadingEmails(true);
     try {
       const list = await getAllowedEmails();
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       setAllowedEmails(list);
+      setEmailsLoaded(true);
     } catch (err) {
-      console.error(err);
+      console.error('Erro ao carregar e-mails autorizados:', err);
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      if (rawMsg.toLowerCase().includes('quota')) {
+        setEmailFeedback({
+          type: 'error',
+          message: 'Cota diária do Firestore excedida ao carregar e-mails. Tente novamente após o reset diário ou faça upgrade do plano Spark.',
+        });
+      }
     } finally {
       setLoadingEmails(false);
     }
   };
 
-
-
   const checkGuilds = async () => {
+    setGuildsChecked(true);
     const results = await Promise.all(
       DEFAULT_GUILDS.map(async g => {
         try {
@@ -285,9 +291,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   useEffect(() => {
-    loadEmails();
-    checkGuilds();
-  }, []);
+    if (activeSubTab === 'emails' && !emailsLoaded && !loadingEmails) {
+      loadEmails();
+    }
+    if (activeSubTab === 'apis' && !guildsChecked) {
+      checkGuilds();
+    }
+  }, [activeSubTab, emailsLoaded, loadingEmails, guildsChecked]);
 
   // Online status helper: consider current user session online
   const isOnlineHelper = (u: UserProfile) => {
@@ -359,30 +369,100 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleAddEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEmail.trim()) return;
+    if (addingEmail) return;
+    setEmailFeedback(null);
 
+    const sanitizedInput = newEmail.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '').trim();
+    if (!sanitizedInput) {
+      setEmailFeedback({ type: 'error', message: 'Informe pelo menos um endereço de e-mail válido.' });
+      return;
+    }
+
+    const candidates = Array.from(
+      new Set(
+        sanitizedInput
+          .split(/[\s,;]+/)
+          .map(item => item.trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+
+    const invalidEmails = candidates.filter(
+      item => item.length < 3 || item.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item)
+    );
+    if (invalidEmails.length > 0) {
+      setEmailFeedback({
+        type: 'error',
+        message: `E-mail inválido: ${invalidEmails.join(', ')}. Verifique se não há espaços extras ou caracteres inválidos.`,
+      });
+      return;
+    }
+
+    setAddingEmail(true);
     try {
-      await addAllowedEmail(
-        newEmail.trim(),
-        newRole,
-        currentUser?.email || 'admin',
-        newNote.trim() || undefined
-      );
+      const nowIso = new Date().toISOString();
+      const addedBy = currentUser?.email || 'admin';
+      const trimmedNote = newNote.trim() || undefined;
+      for (const emailItem of candidates) {
+        await addAllowedEmail(
+          emailItem,
+          newRole,
+          addedBy,
+          trimmedNote
+        );
+      }
       setNewEmail('');
       setNewNote('');
-      setToastMessage('E-mail autorizado com sucesso!');
-      await loadEmails();
+      setAllowedEmails(prev => {
+        const map = new Map(prev.map(item => [item.email.toLowerCase(), item]));
+        candidates.forEach(emailItem => {
+          map.set(emailItem, {
+            id: encodeURIComponent(emailItem),
+            email: emailItem,
+            role: newRole,
+            addedBy,
+            note: trimmedNote || '',
+            createdAt: nowIso,
+          });
+        });
+        return Array.from(map.values()).sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+      });
+      setEmailsLoaded(true);
+      const successMsg =
+        candidates.length === 1
+          ? `E-mail ${candidates[0]} autorizado com sucesso!`
+          : `${candidates.length} e-mails autorizados com sucesso!`;
+      setEmailFeedback({ type: 'success', message: successMsg });
+      setToastMessage(successMsg);
       setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
-      console.error(err);
-      setToastMessage('Falha ao adicionar e-mail.');
+      console.error('Erro ao autorizar e-mail:', err);
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      const lowerMsg = rawMsg.toLowerCase();
+      let friendlyMsg = 'Falha ao adicionar e-mail no Firestore.';
+      if (lowerMsg.includes('quota') || lowerMsg.includes('resource-exhausted')) {
+        friendlyMsg =
+          'Cota diária gratuita do Firestore excedida (Quota exceeded). As gravações serão normalizadas após o reset diário ou upgrade do plano Firebase.';
+      } else if (lowerMsg.includes('permission') || lowerMsg.includes('insufficient')) {
+        friendlyMsg =
+          'Permissão insuficiente no Firestore para cadastrar e-mails. Verifique se sua conta atual está autorizada como Admin.';
+      } else if (rawMsg) {
+        friendlyMsg = `Falha ao adicionar e-mail: ${rawMsg}`;
+      }
+      setEmailFeedback({ type: 'error', message: friendlyMsg });
+      setToastMessage(friendlyMsg);
+    } finally {
+      setAddingEmail(false);
     }
   };
 
   const handleRemoveEmail = async (email: string) => {
     try {
       await removeAllowedEmail(email);
-      await loadEmails();
+      const clean = email.trim().toLowerCase();
+      setAllowedEmails(prev => prev.filter(item => item.email.toLowerCase() !== clean));
       setToastMessage(`Autorização para ${email} removida.`);
       setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
@@ -494,7 +574,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <span>E-mails ({allowedEmails.length})</span>
+              <span>E-mails{emailsLoaded ? ` (${allowedEmails.length})` : ''}</span>
             </button>
 
             <button
@@ -945,18 +1025,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <form onSubmit={handleAddEmail} className="flex flex-col sm:flex-row gap-2.5 sm:gap-3">
               <input
-                type="email"
+                type="text"
+                inputMode="email"
+                autoComplete="email"
                 value={newEmail}
-                onChange={e => setNewEmail(e.target.value)}
-                placeholder="exemplo@gmail.com"
-                required
-                className="flex-1 min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-sm sm:text-xs text-slate-900 dark:text-white"
+                onChange={e => {
+                  setNewEmail(e.target.value);
+                  if (emailFeedback) setEmailFeedback(null);
+                }}
+                placeholder="exemplo@gmail.com (ou vários separados por vírgula)"
+                disabled={addingEmail}
+                className="flex-1 min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-sm sm:text-xs text-slate-900 dark:text-white disabled:opacity-60"
               />
 
               <select
                 value={newRole}
                 onChange={e => setNewRole(e.target.value as 'admin' | 'member')}
-                className="min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm sm:text-xs font-semibold text-slate-900 dark:text-white"
+                disabled={addingEmail}
+                className="min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm sm:text-xs font-semibold text-slate-900 dark:text-white disabled:opacity-60"
               >
                 <option value="member">Membro Regular</option>
                 <option value="admin">Administrador</option>
@@ -966,24 +1052,64 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 type="text"
                 value={newNote}
                 onChange={e => setNewNote(e.target.value)}
+                maxLength={200}
+                disabled={addingEmail}
                 placeholder="Nota (Ex: Líder Missclick)"
-                className="min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm sm:text-xs text-slate-900 dark:text-white"
+                className="min-h-[44px] sm:min-h-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm sm:text-xs text-slate-900 dark:text-white disabled:opacity-60"
               />
 
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1.5 px-4 min-h-[44px] sm:min-h-0 py-2.5 sm:py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap"
+                disabled={addingEmail}
+                className="inline-flex items-center justify-center gap-1.5 px-4 min-h-[44px] sm:min-h-0 py-2.5 sm:py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-60 shadow-md shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap"
               >
-                <UserPlus className="h-4 w-4" />
-                <span>Autorizar</span>
+                {addingEmail ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Autorizando...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="h-4 w-4" />
+                    <span>Autorizar</span>
+                  </>
+                )}
               </button>
             </form>
+
+            {emailFeedback && (
+              <div
+                className={`mt-3 flex items-start gap-2 p-3 rounded-xl border text-xs font-semibold ${
+                  emailFeedback.type === 'error'
+                    ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                    : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                }`}
+              >
+                {emailFeedback.type === 'error' ? (
+                  <AlertCircle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                )}
+                <span className="break-words">{emailFeedback.message}</span>
+              </div>
+            )}
           </div>
 
           <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
-              E-mails Autorizados Atualmente ({allowedEmails.length})
-            </h3>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                E-mails Autorizados Atualmente ({allowedEmails.length})
+              </h3>
+              <button
+                type="button"
+                onClick={loadEmails}
+                disabled={loadingEmails}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loadingEmails ? 'animate-spin' : ''}`} />
+                <span>Atualizar</span>
+              </button>
+            </div>
 
             {/* Mobile Card List */}
             <div className="md:hidden space-y-2.5">
