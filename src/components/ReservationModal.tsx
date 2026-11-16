@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Reservation, HuntDay, SlotType, UserProfile } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { setReservation, deleteReservation, updateUserProfile } from '../services/firestoreService';
+import { setReservation, deleteReservation } from '../services/firestoreService';
 import { RANK_METADATA, getCanonicalPlayerName } from '../constants/guildData';
 import {
   X,
@@ -38,11 +38,26 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   onClose,
   hidePartySharing = false,
 }) => {
-  const { userProfile, isAdmin, currentUser, refreshProfile } = useAuth();
+  const { userProfile, isAdmin, currentUser } = useAuth();
   const [notes, setNotes] = useState(existingReservation?.notes || '');
-  const [selectedUserUid, setSelectedUserUid] = useState(
-    existingReservation?.userUid || userProfile?.uid || ''
-  );
+  const [selectedUserUid, setSelectedUserUid] = useState(() => {
+    const rawUid = existingReservation?.userUid;
+    if (rawUid && usersList.some(u => u.uid === rawUid)) {
+      return rawUid;
+    }
+    if (rawUid?.startsWith('fixed-') && existingReservation?.charName) {
+      const cleanName = existingReservation.charName.trim().toLowerCase();
+      const canonicalName = getCanonicalPlayerName(existingReservation.charName).toLowerCase();
+      const matchedFixed = usersList.find(
+        u =>
+          u.charName &&
+          (u.charName.trim().toLowerCase() === cleanName ||
+            getCanonicalPlayerName(u.charName).toLowerCase() === canonicalName)
+      );
+      if (matchedFixed) return matchedFixed.uid;
+    }
+    return userProfile?.uid || usersList[0]?.uid || '';
+  });
   const [selectedPartyUids, setSelectedPartyUids] = useState<string[]>(
     existingReservation?.partyMemberUids || []
   );
@@ -51,10 +66,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isFixedExisting = Boolean(existingReservation?.userUid?.startsWith('fixed-'));
   const isOwner = Boolean(
     existingReservation && currentUser && (
       existingReservation.userUid === currentUser.uid ||
-      (userProfile?.charName && existingReservation.charName && (
+      (isFixedExisting && userProfile?.charName && existingReservation.charName && (
         existingReservation.charName.trim().toLowerCase() === userProfile.charName.trim().toLowerCase() ||
         getCanonicalPlayerName(existingReservation.charName).toLowerCase() === userProfile.charName.trim().toLowerCase() ||
         existingReservation.charName.trim().toLowerCase() === getCanonicalPlayerName(userProfile.charName).toLowerCase() ||
@@ -66,19 +82,29 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   const canBookRespawn = isAdmin || isLeader;
   const canModify = isAdmin || isOwner;
 
+  const matchedOwnerProfile = existingReservation
+    ? (!isFixedExisting && existingReservation.userUid
+        ? usersList.find(u => u.uid === existingReservation.userUid)
+        : usersList.find(
+            u =>
+              existingReservation.charName &&
+              u.charName &&
+              (u.charName.trim().toLowerCase() === existingReservation.charName.trim().toLowerCase() ||
+                u.charName.trim().toLowerCase() === getCanonicalPlayerName(existingReservation.charName).toLowerCase())
+          ))
+    : undefined;
+
   const canSeeDetails = Boolean(
     isAdmin ||
-    isOwner ||
-    existingReservation?.isPublicVisibility === true ||
-    (currentUser && existingReservation?.partyMemberUids?.includes(currentUser.uid)) ||
-    (currentUser && usersList.some(u => 
-      (u.uid === existingReservation?.userUid ||
-        (existingReservation?.charName && u.charName && (
-          u.charName.trim().toLowerCase() === existingReservation.charName.trim().toLowerCase() ||
-          u.charName.trim().toLowerCase() === getCanonicalPlayerName(existingReservation.charName).toLowerCase()
-        ))) &&
-      u.sharedWith &&
-      (u.sharedWith.includes('all') || u.sharedWith.includes(currentUser.uid))
+    (existingReservation?.charName && (
+      isOwner ||
+      (currentUser && existingReservation.partyMemberUids?.includes(currentUser.uid)) ||
+      (currentUser && (
+        existingReservation.sharedViewerUids?.includes(currentUser.uid) ||
+        existingReservation.sharedViewerUids?.includes('all') ||
+        (matchedOwnerProfile?.sharedWith &&
+          (matchedOwnerProfile.sharedWith.includes('all') || matchedOwnerProfile.sharedWith.includes(currentUser.uid)))
+      ))
     ))
   );
 
@@ -149,8 +175,17 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         existingReservation?.id ||
         `${day}_${respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
 
+      const isSameExistingOwner = Boolean(
+        existingReservation && reservingUser.uid === existingReservation.userUid
+      );
+      const effectivePartyUids = isSameExistingOwner
+        ? selectedPartyUids.filter(uid => uid && uid !== reservingUser.uid)
+        : hidePartySharing
+        ? []
+        : selectedPartyUids.filter(uid => uid && uid !== reservingUser.uid);
+
       const sharedUserNames = usersList
-        .filter(u => selectedPartyUids.includes(u.uid))
+        .filter(u => effectivePartyUids.includes(u.uid))
         .map(u => u.charName)
         .join(', ');
 
@@ -164,23 +199,15 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         userUid: reservingUser.uid,
         userRank: reservingUser.rank,
         partyMembers: sharedUserNames,
-        partyMemberUids: selectedPartyUids,
-        isPublicVisibility: existingReservation?.isPublicVisibility ?? false,
+        partyMemberUids: effectivePartyUids,
+        isPublicVisibility: false,
         notes: notes.trim() || '',
-        reservedAt: existingReservation?.reservedAt || new Date().toISOString(),
+        reservedAt: isSameExistingOwner && existingReservation?.reservedAt
+          ? existingReservation.reservedAt
+          : new Date().toISOString(),
       };
 
       await setReservation(newReservation);
-
-      // Automatically ensure sharedWith includes selected party members for the owner
-      if (reservingUser.uid === userProfile?.uid && selectedPartyUids.length > 0) {
-        const currentShared = userProfile?.sharedWith || [];
-        const newShared = Array.from(new Set([...currentShared, ...selectedPartyUids]));
-        if (newShared.length !== currentShared.length) {
-          await updateUserProfile(userProfile.uid, { sharedWith: newShared });
-          await refreshProfile();
-        }
-      }
 
       onClose();
     } catch (err) {
@@ -291,7 +318,17 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 </label>
                 <select
                   value={selectedUserUid}
-                  onChange={e => setSelectedUserUid(e.target.value)}
+                  onChange={e => {
+                    const nextUid = e.target.value;
+                    setSelectedUserUid(nextUid);
+                    if (existingReservation && nextUid !== existingReservation.userUid) {
+                      setSelectedPartyUids([]);
+                      setNotes('');
+                    } else if (existingReservation && nextUid === existingReservation.userUid) {
+                      setSelectedPartyUids(existingReservation.partyMemberUids || []);
+                      setNotes(existingReservation.notes || '');
+                    }
+                  }}
                   className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm sm:text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {usersList

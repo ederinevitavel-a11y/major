@@ -287,17 +287,18 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
   const isOwnedReservation = (res: Reservation): boolean => {
     if (res.isOccupied === false) return false;
+    const resUserId = res.userUid || '';
+    if (myUserId && resUserId === myUserId) return true;
+    if (!resUserId.startsWith('fixed-')) return false;
     const resChar = res.charName?.trim().toLowerCase() || '';
     const canonicalResChar = getCanonicalPlayerName(res.charName).toLowerCase();
-    const resUserId = res.userUid || '';
     return Boolean(
-      (myUserId && resUserId === myUserId) ||
-        (myCharName &&
-          resChar &&
-          (resChar === myCharName ||
-            canonicalResChar === myCharName ||
-            resChar === myCanonicalChar ||
-            canonicalResChar === myCanonicalChar))
+      myCharName &&
+        resChar &&
+        (resChar === myCharName ||
+          canonicalResChar === myCharName ||
+          resChar === myCanonicalChar ||
+          canonicalResChar === myCanonicalChar)
     );
   };
 
@@ -330,14 +331,16 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
       if (!resChar) return false;
 
       const explicitlyInHuntParty = Boolean(myUserId && res.partyMemberUids?.includes(myUserId));
+      const isFixed = resUserId.startsWith('fixed-');
       const canonicalResChar = getCanonicalPlayerName(resChar).toLowerCase();
-      const ownerProfile = usersList.find(
-        u =>
-          (resUserId && u.uid === resUserId) ||
-          (u.charName &&
-            (u.charName.trim().toLowerCase() === resChar.toLowerCase() ||
-              getCanonicalPlayerName(u.charName).toLowerCase() === canonicalResChar))
-      );
+      const ownerProfile = !isFixed && resUserId
+        ? usersList.find(u => u.uid === resUserId)
+        : usersList.find(
+            u =>
+              u.charName &&
+              (u.charName.trim().toLowerCase() === resChar.toLowerCase() ||
+                getCanonicalPlayerName(u.charName).toLowerCase() === canonicalResChar)
+          );
       const ownerSharedWithMe = Boolean(myUserId && ownerProfile?.sharedWith?.includes(myUserId));
 
       return Boolean(explicitlyInHuntParty || ownerSharedWithMe);

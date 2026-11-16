@@ -10,6 +10,7 @@ import {
   addCustomRespawn,
   removeCustomRespawn,
   deleteReservation,
+  resetAllSharedVisibility,
 } from '../services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from '../services/tibiaDataService';
 import { fetchGuildHighscores, fetchCharacterHighscores, fetchMissclickMembers } from '../services/missclickApi';
@@ -46,6 +47,8 @@ import {
   Clock,
   Copy,
   Archive,
+  Lock,
+  ShieldAlert,
 } from 'lucide-react';
 import { ExportModal } from './ExportModal';
 import { SpecialBackupPanel } from './SpecialBackupPanel';
@@ -168,6 +171,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const [syncingLevels, setSyncingLevels] = useState(false);
+  const [resettingVisibility, setResettingVisibility] = useState(false);
+  const [isResetVisibilityModalOpen, setIsResetVisibilityModalOpen] = useState(false);
+
+  const handleConfirmResetAllVisibility = async () => {
+    setResettingVisibility(true);
+    try {
+      const updatedCount = await resetAllSharedVisibility();
+      await onRefreshUsers();
+      setIsResetVisibilityModalOpen(false);
+      setToastMessage(
+        `Visibilidade resetada com sucesso! ${updatedCount} registro(s) limpo(s) — agora apenas donos e administradores veem os respawns.`
+      );
+      setTimeout(() => setToastMessage(null), 6000);
+    } catch (err) {
+      console.error(err);
+      setToastMessage('Erro ao resetar visibilidades compartilhadas.');
+      setTimeout(() => setToastMessage(null), 5000);
+    } finally {
+      setResettingVisibility(false);
+    }
+  };
 
   const handleSyncAllLevels = async () => {
     setSyncingLevels(true);
@@ -1416,6 +1440,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </button>
           </div>
 
+          {/* Optional Global Visibility Revocation Card */}
+          <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
+                  <Lock className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                    Revogar Compartilhamentos da Guilda (Opcional)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                    As permissões de visibilidade funcionam automaticamente. Use esta opção apenas se quiser zerar todas as liberações feitas pelos jogadores no <strong>Dê visibilidade</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsResetVisibilityModalOpen(true)}
+                disabled={resettingVisibility}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 min-h-[44px] py-2.5 rounded-xl border border-rose-300 dark:border-rose-800 bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold transition-all cursor-pointer whitespace-nowrap disabled:opacity-50 shrink-0"
+              >
+                <EyeOff className="h-4 w-4" />
+                <span>Resetar Toda Visibilidade</span>
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
             {guildDiagnostics.map(diag => (
               <div
@@ -1854,6 +1907,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           reservations={reservations}
           onClose={() => setIsExcelBackupOpen(false)}
         />
+      )}
+
+      {/* Confirmation Modal for Resetting All Shared Visibility */}
+      {isResetVisibilityModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
+                <ShieldAlert className="h-5 w-5" />
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Resetar Toda Visibilidade Compartilhada?
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                  Isso vai limpar todas as listas de compartilhamento (<strong className="text-slate-800 dark:text-slate-200">Dê visibilidade</strong>) e membros de party em todas as reservas atuais. Após confirmar, somente o dono do respawn e administradores poderão visualizar os nomes na grade até que cada jogador compartilhe novamente.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsResetVisibilityModalOpen(false)}
+                disabled={resettingVisibility}
+                className="px-4 min-h-[42px] py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmResetAllVisibility}
+                disabled={resettingVisibility}
+                className="inline-flex items-center justify-center gap-2 px-4 min-h-[42px] py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-500/20 cursor-pointer disabled:opacity-50"
+              >
+                {resettingVisibility ? <Loader2 className="h-4 w-4 animate-spin" /> : <EyeOff className="h-4 w-4" />}
+                <span>{resettingVisibility ? 'Resetando...' : 'Confirmar Reset Global'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

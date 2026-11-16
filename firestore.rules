@@ -371,6 +371,7 @@ service cloud.firestore {
       allow create: if isWhitelisted() &&
         isValidId(reservationId) &&
         isValidReservationSlot(incoming(), reservationId) &&
+        (!('isPublicVisibility' in incoming()) || incoming().isPublicVisibility == false) &&
         (isAdmin() ||
          (isLeader() && incoming().userUid == request.auth.uid) ||
          isValidAtomicClaim(incoming()));
@@ -378,8 +379,9 @@ service cloud.firestore {
         isValidId(reservationId) &&
         isValidReservationSlot(incoming(), reservationId) &&
         (isAdmin() ||
-         (isLeader() && existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid) ||
+         (isLeader() && existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid && (!('isPublicVisibility' in incoming()) || incoming().isPublicVisibility == false)) ||
          ((isOwner(existing().userUid) || isFixedSlotOwnedBySignedInUser(reservationId)) &&
+          (!('isPublicVisibility' in incoming()) || incoming().isPublicVisibility == false) &&
           incoming().diff(existing()).affectedKeys().hasOnly(['isPublicVisibility'])));
       allow delete: if isWhitelisted() &&
         isValidId(reservationId) &&
@@ -391,23 +393,26 @@ service cloud.firestore {
       allow list: if isWhitelisted() && (
         isAdmin() ||
         existing().userUid == request.auth.uid ||
-        existing().isPublicVisibility == true ||
-        request.auth.uid in existing().partyMemberUids ||
-        request.auth.uid in existing().sharedViewerUids ||
-        'all' in existing().sharedViewerUids
+        (existing().partyMemberUids is list && request.auth.uid in existing().partyMemberUids) ||
+        (existing().sharedViewerUids is list && (
+          request.auth.uid in existing().sharedViewerUids ||
+          'all' in existing().sharedViewerUids
+        ))
       );
       allow get: if isWhitelisted() && isValidId(reservationId) && (
         isAdmin() ||
         existing().userUid == request.auth.uid ||
-        existing().isPublicVisibility == true ||
-        request.auth.uid in existing().partyMemberUids ||
-        request.auth.uid in existing().sharedViewerUids ||
-        'all' in existing().sharedViewerUids ||
+        (existing().partyMemberUids is list && request.auth.uid in existing().partyMemberUids) ||
+        (existing().sharedViewerUids is list && (
+          request.auth.uid in existing().sharedViewerUids ||
+          'all' in existing().sharedViewerUids
+        )) ||
         isFixedSlotOwnedBySignedInUser(reservationId)
       );
       allow create: if isWhitelisted() &&
         isValidId(reservationId) &&
         isValidReservationDetails(incoming(), reservationId) &&
+        (!('isPublicVisibility' in incoming()) || incoming().isPublicVisibility == false) &&
         (isAdmin() ||
          (isLeader() && incoming().userUid == request.auth.uid) ||
          isValidAtomicDetailClaim(incoming()));
@@ -415,8 +420,9 @@ service cloud.firestore {
         isValidId(reservationId) &&
         isValidReservationDetails(incoming(), reservationId) &&
         (isAdmin() ||
-         (isLeader() && existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid) ||
+         (isLeader() && existing().userUid == request.auth.uid && incoming().userUid == request.auth.uid && (!('isPublicVisibility' in incoming()) || incoming().isPublicVisibility == false)) ||
          ((isOwner(existing().userUid) || isFixedSlotOwnedBySignedInUser(reservationId)) &&
+          (!('isPublicVisibility' in incoming()) || incoming().isPublicVisibility == false) &&
           incoming().diff(existing()).affectedKeys().hasOnly([
             'isPublicVisibility', 'partyMembers', 'partyMemberUids', 'sharedViewerUids', 'notes', 'updatedAt'
           ])));

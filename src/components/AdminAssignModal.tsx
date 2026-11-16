@@ -210,6 +210,8 @@ export const AdminAssignModal: React.FC<AdminAssignModalProps> = ({
         userUid: activeUser.uid,
         userRank: activeUser.rank,
         partyMembers: '',
+        partyMemberUids: [],
+        isPublicVisibility: false,
         notes: notes.trim() || '',
         reservedAt: new Date().toISOString(),
       };

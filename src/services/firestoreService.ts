@@ -200,22 +200,45 @@ export async function updateUserProfile(uid: string, updates: Partial<UserProfil
     }
 
     if (updates.sharedWith !== undefined) {
-      try {
-        const ownDetailsSnap = await getDocs(
-          query(collection(db, 'reservation_details'), where('userUid', '==', uid))
-        );
-        if (!ownDetailsSnap.empty) {
-          const syncBatch = writeBatch(db);
-          ownDetailsSnap.docs.forEach(d => {
-            syncBatch.update(d.ref, {
-              sharedViewerUids: updates.sharedWith || [],
-              updatedAt: nowIso,
+      const normalizedSharedWith = Array.from(
+        new Set(
+          (updates.sharedWith || []).filter(
+            (item): item is string => typeof item === 'string' && item.trim().length > 0 && item !== uid
+          )
+        )
+      );
+      const ownDetailsSnap = await getDocs(
+        query(collection(db, 'reservation_details'), where('userUid', '==', uid))
+      );
+      if (!ownDetailsSnap.empty) {
+        const chunkSize = 400;
+        for (let i = 0; i < ownDetailsSnap.docs.length; i += chunkSize) {
+          const chunk = ownDetailsSnap.docs.slice(i, i + chunkSize);
+          try {
+            const syncBatch = writeBatch(db);
+            chunk.forEach(d => {
+              syncBatch.update(d.ref, {
+                sharedViewerUids: normalizedSharedWith,
+                isPublicVisibility: false,
+                updatedAt: nowIso,
+              });
             });
-          });
-          await syncBatch.commit();
+            await syncBatch.commit();
+          } catch {
+            // Fallback per-doc so a single legacy malformed doc never blocks revoking access on all other slots
+            for (const d of chunk) {
+              try {
+                await updateDoc(d.ref, {
+                  sharedViewerUids: normalizedSharedWith,
+                  isPublicVisibility: false,
+                  updatedAt: nowIso,
+                });
+              } catch (singleErr) {
+                console.warn(`Reservation details sync failed for ${d.id}:`, singleErr);
+              }
+            }
+          }
         }
-      } catch (syncErr) {
-        console.warn('Reservation details sharedViewerUids sync notice:', syncErr);
       }
     }
   } catch (error) {
@@ -225,11 +248,12 @@ export async function updateUserProfile(uid: string, updates: Partial<UserProfil
 
 export async function ensureMemberDirectoryEntry(profile: UserProfile): Promise<void> {
   if (!profile?.uid) return;
-  const cacheKey = `major_dir_synced_${profile.uid}`;
+  const cacheKey = `major_dir_synced_v2_${profile.uid}`;
   try {
-    if (localStorage.getItem(cacheKey) === '1') return;
+    if (sessionStorage.getItem(cacheKey) === '1') return;
     const dirRef = doc(db, 'member_directory', profile.uid);
     const snap = await getDoc(dirRef);
+    const expectedShared = sanitizeUidList(profile.sharedWith, profile.uid);
     if (!snap.exists()) {
       await setDoc(dirRef, cleanData({
         uid: profile.uid,
@@ -238,11 +262,19 @@ export async function ensureMemberDirectoryEntry(profile: UserProfile): Promise<
         rank: profile.rank,
         vocation: profile.vocation,
         level: profile.level,
-        sharedWith: profile.sharedWith ?? [],
+        sharedWith: expectedShared,
         updatedAt: new Date().toISOString(),
       }));
+    } else {
+      const curShared = sanitizeUidList(snap.data()?.sharedWith, profile.uid);
+      if (JSON.stringify(curShared) !== JSON.stringify(expectedShared)) {
+        await updateDoc(dirRef, {
+          sharedWith: expectedShared,
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
-    localStorage.setItem(cacheKey, '1');
+    sessionStorage.setItem(cacheKey, '1');
   } catch (err) {
     console.debug('Member directory sync notice:', err);
   }
@@ -413,19 +445,16 @@ export function subscribeToReservations(
   const ownDetailsMap = new Map<string, ReservationDetails>();
   const fixedOwnDetailsMap = new Map<string, ReservationDetails>();
   const attemptedFixedDetailGets = new Set<string>();
-  const publicDetailsMap = new Map<string, ReservationDetails>();
   const partyDetailsMap = new Map<string, ReservationDetails>();
   const sharedDetailsMap = new Map<string, ReservationDetails>();
   const detailsMap = new Map<string, ReservationDetails>();
   let isDisposed = false;
   let unsubDetails: Unsubscribe | null = null;
-  let unsubPublicDetails: Unsubscribe | null = null;
   let unsubPartyDetails: Unsubscribe | null = null;
   let unsubSharedDetails: Unsubscribe | null = null;
 
   const rebuildDetailsMap = () => {
     detailsMap.clear();
-    publicDetailsMap.forEach((v, k) => detailsMap.set(k, v));
     sharedDetailsMap.forEach((v, k) => detailsMap.set(k, v));
     partyDetailsMap.forEach((v, k) => detailsMap.set(k, v));
     fixedOwnDetailsMap.forEach((v, k) => detailsMap.set(k, v));
@@ -547,50 +576,66 @@ export function subscribeToReservations(
           });
       }
 
-      const detail = detailsMap.get(slot.id);
+      const rawDetail = detailsMap.get(slot.id);
+      const isFixedSlot = Boolean(slot.userUid?.startsWith('fixed-'));
       const isVerifiedDetailOwner = Boolean(
-        detail && matchesCurrentUserChar(detail.charName)
+        isFixedSlot && rawDetail && matchesCurrentUserChar(rawDetail.charName)
       );
       const isOwner = Boolean(
         currentUserUid &&
-          (slot.userUid === currentUserUid || isFixedMatchedByDefault || isVerifiedDetailOwner)
+          (slot.userUid === currentUserUid ||
+            (isFixedSlot && (isFixedMatchedByDefault || isVerifiedDetailOwner)))
       );
+      const detailIsAuthorizedForViewer = Boolean(
+        isAdmin ||
+          (currentUserUid &&
+            rawDetail &&
+            (rawDetail.userUid === currentUserUid ||
+              isOwner ||
+              (Array.isArray(rawDetail.partyMemberUids) &&
+                rawDetail.partyMemberUids.includes(currentUserUid)) ||
+              (Array.isArray(rawDetail.sharedViewerUids) &&
+                (rawDetail.sharedViewerUids.includes(currentUserUid) ||
+                  rawDetail.sharedViewerUids.includes('all')))))
+      );
+      const detail = detailIsAuthorizedForViewer ? rawDetail : undefined;
       const canSee = isAdmin || isOwner || Boolean(detail);
-      const fallbackFixed = isFixedMatchedByDefault ? matchedDefaultFixed : undefined;
+      const fallbackFixed = isFixedSlot && isFixedMatchedByDefault ? matchedDefaultFixed : undefined;
 
       const merged: Reservation = {
         ...slot,
         userUid:
-          (isFixedMatchedByDefault || isVerifiedDetailOwner) && currentUserUid
+          isFixedSlot && (isFixedMatchedByDefault || isVerifiedDetailOwner) && currentUserUid
             ? currentUserUid
             : slot.userUid,
         respawnName: getCleanName(slot.respawnName),
-        isPublicVisibility: slot.isPublicVisibility || detail?.isPublicVisibility || false,
+        isPublicVisibility: false,
         partyMemberUids:
           detail?.partyMemberUids ||
           (slot as unknown as { partyMemberUids?: string[] }).partyMemberUids ||
           [],
+        sharedViewerUids: detail?.sharedViewerUids,
         // Strict Zero-Knowledge: regular members NEVER receive other players' character names, party, or notes unless visibility is granted!
         charName: canSee
           ? detail?.charName ||
-            (slot as unknown as { charName?: string }).charName ||
+            (isOwner ? (slot as unknown as { charName?: string }).charName : '') ||
             fallbackFixed?.charName ||
             ''
           : '',
         userRank: canSee
           ? detail?.userRank ||
-            (slot as unknown as { userRank?: Reservation['userRank'] }).userRank ||
+            (isOwner ? (slot as unknown as { userRank?: Reservation['userRank'] }).userRank : undefined) ||
             fallbackFixed?.userRank ||
             'Member'
           : undefined,
         partyMembers: canSee
           ? detail?.partyMembers ||
-            (slot as unknown as { partyMembers?: string }).partyMembers ||
+            (isOwner ? (slot as unknown as { partyMembers?: string }).partyMembers : undefined) ||
             fallbackFixed?.partyMembers
           : undefined,
         notes: canSee
           ? detail?.notes ||
-            (slot as unknown as { notes?: string }).notes ||
+            (isOwner ? (slot as unknown as { notes?: string }).notes : undefined) ||
             fallbackFixed?.notes
           : undefined,
       };
@@ -605,11 +650,22 @@ export function subscribeToReservations(
       const canonicalFixed = resolveAgendaCanonicalReservation({
         ...fixed,
         partyMemberUids: [],
+        isPublicVisibility: false,
       });
-      if (currentUserUid && matchesCurrentUserChar(canonicalFixed.charName)) {
+      const isFixedOwner = Boolean(currentUserUid && matchesCurrentUserChar(canonicalFixed.charName));
+      if (isFixedOwner && currentUserUid) {
         return {
           ...canonicalFixed,
           userUid: currentUserUid,
+        };
+      }
+      if (!isAdmin) {
+        return {
+          ...canonicalFixed,
+          charName: '',
+          userRank: undefined,
+          partyMembers: undefined,
+          notes: undefined,
         };
       }
       return canonicalFixed;
@@ -698,23 +754,7 @@ export function subscribeToReservations(
       }
     );
 
-    // 2b. Public-visibility reservation details
-    unsubPublicDetails = onSnapshot(
-      query(collection(db, 'reservation_details'), where('isPublicVisibility', '==', true)),
-      snapshot => {
-        publicDetailsMap.clear();
-        snapshot.docs.forEach(d => {
-          publicDetailsMap.set(d.id, { id: d.id, ...(d.data() as Omit<ReservationDetails, 'id'>) });
-        });
-        rebuildDetailsMap();
-        emit();
-      },
-      error => {
-        console.warn('Public reservation_details subscription:', error);
-      }
-    );
-
-    // 2c. Party member reservation details
+    // 2b. Party member reservation details (only hunts where currentUserUid is explicitly in party)
     unsubPartyDetails = onSnapshot(
       query(collection(db, 'reservation_details'), where('partyMemberUids', 'array-contains', currentUserUid)),
       snapshot => {
@@ -730,7 +770,7 @@ export function subscribeToReservations(
       }
     );
 
-    // 2d. Reservations shared directly with this member or 'all' via sharedViewerUids
+    // 2c. Reservations shared directly with this member or 'all' via sharedViewerUids
     unsubSharedDetails = onSnapshot(
       query(
         collection(db, 'reservation_details'),
@@ -755,19 +795,39 @@ export function subscribeToReservations(
     unsubSlots();
     unsubDeletedFixed();
     if (unsubDetails) unsubDetails();
-    if (unsubPublicDetails) unsubPublicDetails();
     if (unsubPartyDetails) unsubPartyDetails();
     if (unsubSharedDetails) unsubSharedDetails();
   };
 }
 
+function sanitizeUidList(list: unknown, ownerUid?: string): string[] {
+  if (!Array.isArray(list)) return [];
+  return Array.from(
+    new Set(
+      list.filter(
+        (item): item is string =>
+          typeof item === 'string' && item.trim().length > 0 && (!ownerUid || item !== ownerUid)
+      )
+    )
+  );
+}
+
 async function resolveOwnerSharedWith(userUid: string): Promise<string[]> {
   if (!userUid || userUid.startsWith('fixed-')) return [];
+  try {
+    const userSnap = await getDoc(doc(db, 'users', userUid));
+    if (userSnap.exists()) {
+      const data = userSnap.data() as Partial<UserProfile>;
+      if (Array.isArray(data.sharedWith)) return sanitizeUidList(data.sharedWith, userUid);
+    }
+  } catch {
+    // Non-admin reading another user's private profile falls back to member_directory
+  }
   try {
     const snap = await getDoc(doc(db, 'member_directory', userUid));
     if (snap.exists()) {
       const data = snap.data() as Partial<MemberDirectoryProfile>;
-      if (Array.isArray(data.sharedWith)) return data.sharedWith;
+      if (Array.isArray(data.sharedWith)) return sanitizeUidList(data.sharedWith, userUid);
     }
   } catch {
     // ignore
@@ -778,8 +838,11 @@ async function resolveOwnerSharedWith(userUid: string): Promise<string[]> {
 export async function setReservation(reservation: Reservation): Promise<void> {
   const pathSlot = `reservations/${reservation.id}`;
   try {
-    const sharedViewerUids =
-      reservation.sharedViewerUids ?? (await resolveOwnerSharedWith(reservation.userUid));
+    const sharedViewerUids = sanitizeUidList(
+      reservation.sharedViewerUids ?? (await resolveOwnerSharedWith(reservation.userUid)),
+      reservation.userUid
+    );
+    const partyMemberUids = sanitizeUidList(reservation.partyMemberUids, reservation.userUid);
     const batch = writeBatch(db);
 
     // 1. Public anonymous slot (strictly no charName, no partyMembers, no notes)
@@ -791,8 +854,8 @@ export async function setReservation(reservation: Reservation): Promise<void> {
       respawnName: reservation.respawnName,
       userUid: reservation.userUid,
       isOccupied: true,
-      isPublicVisibility: reservation.isPublicVisibility ?? false,
-      partyMemberUids: reservation.partyMemberUids || [],
+      isPublicVisibility: false,
+      partyMemberUids,
       reservedAt: reservation.reservedAt || new Date().toISOString(),
       releasedRespawnId: reservation.releasedRespawnId,
     };
@@ -804,9 +867,9 @@ export async function setReservation(reservation: Reservation): Promise<void> {
       userUid: reservation.userUid,
       userRank: reservation.userRank || 'Member',
       partyMembers: reservation.partyMembers || '',
-      partyMemberUids: reservation.partyMemberUids || [],
+      partyMemberUids,
       sharedViewerUids,
-      isPublicVisibility: reservation.isPublicVisibility ?? false,
+      isPublicVisibility: false,
       notes: reservation.notes || '',
       createdAt: reservation.reservedAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -825,19 +888,6 @@ export async function setReservation(reservation: Reservation): Promise<void> {
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, pathSlot);
-    throw error;
-  }
-}
-
-export async function updateReservationVisibility(reservationId: string, isPublicVisibility: boolean): Promise<void> {
-  const path = `reservations/${reservationId}`;
-  try {
-    const batch = writeBatch(db);
-    batch.update(doc(db, 'reservations', reservationId), { isPublicVisibility });
-    batch.update(doc(db, 'reservation_details', reservationId), { isPublicVisibility });
-    await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }
 }
@@ -923,19 +973,41 @@ export async function clearAllReservations(dayFilter?: HuntDay): Promise<number>
   }
 }
 
-// One-time auto sanitizer for legacy reservations to guarantee no character names linger in the public collection
+// One-time auto sanitizer for legacy reservations and visibility privacy (runs automatically on admin login)
 export async function sanitizeLegacyReservations(): Promise<number> {
+  let totalFixed = 0;
+
+  // v3 Privacy Audit runs independently of v2 so previously migrated databases still clean up automatically
+  try {
+    const v3SessionKey = 'major_visibility_audit_v3';
+    if (sessionStorage.getItem(v3SessionKey) !== '1') {
+      const v3MarkerRef = doc(db, 'settings', 'visibility_privacy_audit_v3');
+      const v3MarkerSnap = await getDoc(v3MarkerRef);
+      if (!v3MarkerSnap.exists()) {
+        const fixedCount = await auditAndSyncVisibilityPrivacy();
+        await setDoc(v3MarkerRef, {
+          completedAt: new Date().toISOString(),
+          fixedCount,
+        });
+        totalFixed += fixedCount;
+      }
+      sessionStorage.setItem(v3SessionKey, '1');
+    }
+  } catch (auditErr) {
+    console.warn('Automatic visibility privacy audit notice:', auditErr);
+  }
+
   const sessionKey = 'major_legacy_sanitized_v2';
   try {
     if (sessionStorage.getItem(sessionKey) === '1') {
-      return 0;
+      return totalFixed;
     }
 
     const doneMarkerRef = doc(db, 'settings', 'legacy_sanitization_v2');
     const doneMarkerSnap = await getDoc(doneMarkerRef);
     if (doneMarkerSnap.exists()) {
       sessionStorage.setItem(sessionKey, '1');
-      return 0;
+      return totalFixed;
     }
 
     const snap = await getDocs(collection(db, 'reservations'));
@@ -1120,10 +1192,11 @@ export async function sanitizeLegacyReservations(): Promise<number> {
       cleanedCount,
     });
     sessionStorage.setItem(sessionKey, '1');
-    return cleanedCount;
+
+    return totalFixed + cleanedCount;
   } catch (err) {
     console.warn('Legacy reservations sanitization notice:', err);
-    return 0;
+    return totalFixed;
   }
 }
 
@@ -1309,8 +1382,11 @@ export async function claimReleasedRespawn(
   const path = `released_respawns/${releasedItem.id}`;
   const targetReservationId = releasedItem.claimReservationId || reservation.id;
   try {
-    const sharedViewerUids =
-      reservation.sharedViewerUids ?? (await resolveOwnerSharedWith(reservation.userUid));
+    const sharedViewerUids = sanitizeUidList(
+      reservation.sharedViewerUids ?? (await resolveOwnerSharedWith(reservation.userUid)),
+      reservation.userUid
+    );
+    const partyMemberUids = sanitizeUidList(reservation.partyMemberUids, reservation.userUid);
     const batch = writeBatch(db);
     const nowIso = new Date().toISOString();
 
@@ -1322,8 +1398,8 @@ export async function claimReleasedRespawn(
       respawnName: reservation.respawnName,
       userUid: reservation.userUid,
       isOccupied: true,
-      isPublicVisibility: reservation.isPublicVisibility ?? false,
-      partyMemberUids: reservation.partyMemberUids || [],
+      isPublicVisibility: false,
+      partyMemberUids,
       reservedAt: reservation.reservedAt || nowIso,
       releasedRespawnId: releasedItem.id,
     };
@@ -1334,9 +1410,9 @@ export async function claimReleasedRespawn(
       userUid: reservation.userUid,
       userRank: reservation.userRank || 'Member',
       partyMembers: reservation.partyMembers || '',
-      partyMemberUids: reservation.partyMemberUids || [],
+      partyMemberUids,
       sharedViewerUids,
-      isPublicVisibility: reservation.isPublicVisibility ?? false,
+      isPublicVisibility: false,
       notes: reservation.notes || '',
       createdAt: reservation.reservedAt || nowIso,
       updatedAt: nowIso,
@@ -1585,6 +1661,10 @@ export async function restoreSpecialRespawnsBackup(
           r.userUid ||
           `fixed-${(r.charName || 'player').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
 
+        const partyMembersText = typeof r.partyMembers === 'string' ? r.partyMembers.trim() : '';
+        const currentPartyUids = partyMembersText ? sanitizeUidList(r.partyMemberUids, resolvedUid) : [];
+        const currentSharedUids = sanitizeUidList(matchedMember?.sharedWith, resolvedUid);
+
         const publicSlot: Record<string, unknown> = {
           id: r.id,
           day: r.day,
@@ -1593,8 +1673,8 @@ export async function restoreSpecialRespawnsBackup(
           respawnName: r.respawnName,
           userUid: resolvedUid,
           isOccupied: true,
-          isPublicVisibility: r.isPublicVisibility ?? false,
-          partyMemberUids: r.partyMemberUids || [],
+          isPublicVisibility: false,
+          partyMemberUids: currentPartyUids,
           reservedAt: r.reservedAt || new Date().toISOString(),
         };
 
@@ -1604,12 +1684,9 @@ export async function restoreSpecialRespawnsBackup(
           userUid: resolvedUid,
           userRank: matchedMember?.rank || r.userRank || 'Member',
           partyMembers: r.partyMembers || '',
-          partyMemberUids: r.partyMemberUids || [],
-          sharedViewerUids:
-            r.sharedViewerUids && r.sharedViewerUids.length > 0
-              ? r.sharedViewerUids
-              : matchedMember?.sharedWith || [],
-          isPublicVisibility: r.isPublicVisibility ?? false,
+          partyMemberUids: currentPartyUids,
+          sharedViewerUids: currentSharedUids,
+          isPublicVisibility: false,
           notes: r.notes || '',
           createdAt: r.reservedAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1709,10 +1786,8 @@ export async function reconcileFixedReservationsWithUsers(
         batch.update(doc(db, 'reservation_details', r.id), {
           userUid: matched.uid,
           userRank: matched.rank || r.userRank || 'Member',
-          sharedViewerUids:
-            Array.isArray(matched.sharedWith) && matched.sharedWith.length > 0
-              ? matched.sharedWith
-              : detailSnap.data()?.sharedViewerUids || [],
+          sharedViewerUids: sanitizeUidList(matched.sharedWith, matched.uid),
+          isPublicVisibility: false,
           updatedAt: new Date().toISOString(),
         });
       }
@@ -1726,9 +1801,186 @@ export async function reconcileFixedReservationsWithUsers(
   return updated;
 }
 
+// Audit and enforce strict reservation visibility parity across users, member_directory, reservations, and reservation_details
+export async function auditAndSyncVisibilityPrivacy(): Promise<number> {
+  const [usersSnap, dirSnap, slotsSnap, detailsSnap] = await Promise.all([
+    getDocs(collection(db, 'users')),
+    getDocs(collection(db, 'member_directory')),
+    getDocs(collection(db, 'reservations')),
+    getDocs(collection(db, 'reservation_details')),
+  ]);
 
+  const nowIso = new Date().toISOString();
+  const authoritativeSharedByUid = new Map<string, string[]>();
+  const validUserUids = new Set<string>();
 
+  usersSnap.docs.forEach(d => {
+    const data = d.data() as Partial<UserProfile>;
+    validUserUids.add(d.id);
+    authoritativeSharedByUid.set(d.id, sanitizeUidList(data.sharedWith, d.id));
+  });
 
+  const ops: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = [];
 
+  // 1. Sync member_directory.sharedWith strictly with users.sharedWith
+  dirSnap.docs.forEach(d => {
+    if (!validUserUids.has(d.id)) return;
+    const expectedShared = authoritativeSharedByUid.get(d.id) || [];
+    const currentShared = sanitizeUidList(d.data()?.sharedWith, d.id);
+    if (JSON.stringify(currentShared) !== JSON.stringify(expectedShared)) {
+      ops.push({
+        ref: d.ref,
+        data: { sharedWith: expectedShared, updatedAt: nowIso },
+      });
+    }
+  });
 
+  // 2. Clean reservation_details: enforce authoritative sharedViewerUids & disable isPublicVisibility bypass
+  const detailPartyMap = new Map<string, { partyMemberUids: string[]; partyMembers: string }>();
+  detailsSnap.docs.forEach(d => {
+    const data = d.data() as Record<string, unknown>;
+    const ownerUid = typeof data.userUid === 'string' ? data.userUid : '';
+    const expectedShared =
+      ownerUid && validUserUids.has(ownerUid) ? authoritativeSharedByUid.get(ownerUid) || [] : [];
+    const currentShared = Array.isArray(data.sharedViewerUids) ? data.sharedViewerUids : undefined;
 
+    const rawPartyUids = sanitizeUidList(data.partyMemberUids, ownerUid).filter(uid =>
+      validUserUids.has(uid)
+    );
+    const partyMembersText = typeof data.partyMembers === 'string' ? data.partyMembers.trim() : '';
+    const cleanPartyUids = partyMembersText ? rawPartyUids : [];
+    detailPartyMap.set(d.id, { partyMemberUids: cleanPartyUids, partyMembers: partyMembersText });
+
+    const needsDetailFix =
+      data.isPublicVisibility === true ||
+      data.isPublicVisibility === undefined ||
+      JSON.stringify(currentShared ?? []) !== JSON.stringify(expectedShared) ||
+      JSON.stringify(Array.isArray(data.partyMemberUids) ? data.partyMemberUids : []) !==
+        JSON.stringify(cleanPartyUids);
+
+    if (needsDetailFix) {
+      ops.push({
+        ref: d.ref,
+        data: {
+          sharedViewerUids: expectedShared,
+          partyMemberUids: cleanPartyUids,
+          isPublicVisibility: false,
+          updatedAt: nowIso,
+        },
+      });
+    }
+  });
+
+  // 3. Clean slots: remove legacy PII and disable isPublicVisibility bypass
+  slotsSnap.docs.forEach(d => {
+    const data = d.data() as Record<string, unknown>;
+    const detailParty = detailPartyMap.get(d.id);
+    const expectedParty = detailParty
+      ? detailParty.partyMemberUids
+      : sanitizeUidList(data.partyMemberUids, typeof data.userUid === 'string' ? data.userUid : '');
+
+    const hasLegacyFields =
+      data.charName !== undefined ||
+      data.partyMembers !== undefined ||
+      data.notes !== undefined ||
+      data.userRank !== undefined;
+
+    const needsSlotFix =
+      hasLegacyFields ||
+      data.isPublicVisibility === true ||
+      data.isPublicVisibility === undefined ||
+      JSON.stringify(Array.isArray(data.partyMemberUids) ? data.partyMemberUids : []) !==
+        JSON.stringify(expectedParty);
+
+    if (needsSlotFix) {
+      const updatePayload: Record<string, unknown> = {
+        isPublicVisibility: false,
+        partyMemberUids: expectedParty,
+      };
+      if (data.charName !== undefined) updatePayload.charName = deleteField();
+      if (data.partyMembers !== undefined) updatePayload.partyMembers = deleteField();
+      if (data.notes !== undefined) updatePayload.notes = deleteField();
+      if (data.userRank !== undefined) updatePayload.userRank = deleteField();
+      ops.push({ ref: d.ref, data: updatePayload });
+    }
+  });
+
+  const chunkSize = 400;
+  for (let i = 0; i < ops.length; i += chunkSize) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + chunkSize).forEach(op => batch.update(op.ref, op.data));
+    await batch.commit();
+  }
+
+  return ops.length;
+}
+
+// Emergency admin reset: revoke all shared visibility and per-slot party lists so ONLY owners & admins can see respawns
+export async function resetAllSharedVisibility(): Promise<number> {
+  const [usersSnap, dirSnap, slotsSnap, detailsSnap] = await Promise.all([
+    getDocs(collection(db, 'users')),
+    getDocs(collection(db, 'member_directory')),
+    getDocs(collection(db, 'reservations')),
+    getDocs(collection(db, 'reservation_details')),
+  ]);
+
+  const nowIso = new Date().toISOString();
+  const ops: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = [];
+
+  usersSnap.docs.forEach(d => {
+    const shared = d.data()?.sharedWith;
+    if (Array.isArray(shared) && shared.length > 0) {
+      ops.push({ ref: d.ref, data: { sharedWith: [], updatedAt: nowIso } });
+    }
+  });
+
+  dirSnap.docs.forEach(d => {
+    const shared = d.data()?.sharedWith;
+    if (Array.isArray(shared) && shared.length > 0) {
+      ops.push({ ref: d.ref, data: { sharedWith: [], updatedAt: nowIso } });
+    }
+  });
+
+  slotsSnap.docs.forEach(d => {
+    const data = d.data() as Record<string, unknown>;
+    if (
+      data.isPublicVisibility === true ||
+      (Array.isArray(data.partyMemberUids) && data.partyMemberUids.length > 0)
+    ) {
+      ops.push({
+        ref: d.ref,
+        data: { isPublicVisibility: false, partyMemberUids: [] },
+      });
+    }
+  });
+
+  detailsSnap.docs.forEach(d => {
+    const data = d.data() as Record<string, unknown>;
+    if (
+      data.isPublicVisibility === true ||
+      (Array.isArray(data.sharedViewerUids) && data.sharedViewerUids.length > 0) ||
+      (Array.isArray(data.partyMemberUids) && data.partyMemberUids.length > 0) ||
+      (typeof data.partyMembers === 'string' && data.partyMembers.trim().length > 0)
+    ) {
+      ops.push({
+        ref: d.ref,
+        data: {
+          sharedViewerUids: [],
+          partyMemberUids: [],
+          partyMembers: '',
+          isPublicVisibility: false,
+          updatedAt: nowIso,
+        },
+      });
+    }
+  });
+
+  const chunkSize = 400;
+  for (let i = 0; i < ops.length; i += chunkSize) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + chunkSize).forEach(op => batch.update(op.ref, op.data));
+    await batch.commit();
+  }
+
+  return ops.length;
+}

@@ -251,7 +251,10 @@ const MainDashboard: React.FC = () => {
 
   // Subscribe to real-time reservations with zero-knowledge data privacy
   useEffect(() => {
-    if (loading || !currentUser || !isAuthorized || needsCharacterLink || profileLoadError) return;
+    if (loading || !currentUser || !isAuthorized || needsCharacterLink || profileLoadError) {
+      setReservations([]);
+      return;
+    }
 
     // If administrator, run one-time sanitation check (gated by marker doc + session cache)
     if (isAdmin) {
@@ -269,7 +272,10 @@ const MainDashboard: React.FC = () => {
       undefined,
       () => charNameRef.current
     );
-    return () => unsub();
+    return () => {
+      unsub();
+      setReservations([]);
+    };
   }, [loading, currentUser, isAuthorized, isAdmin, needsCharacterLink, profileLoadError]);
 
   // Admin auto-reconciliation: upgrade any stored fixed-* reservation docs to the player's real Firebase UID
@@ -287,10 +293,14 @@ const MainDashboard: React.FC = () => {
   }, [loading, currentUser, isAuthorized, isAdmin, reservations, usersList]);
 
   // Dynamically link reservations (especially fixed special schedule slots) to registered user accounts by character name,
-  // while masking fixed-slot third-party details for non-admin members unless owned/shared/public.
+  // while strictly masking third-party details for non-admin members unless owned or explicitly shared.
   const linkedReservations = useMemo(() => {
+    const userByUid = new Map<string, UserProfile>();
     const userByCharName = new Map<string, UserProfile>();
     (usersList || []).forEach(u => {
+      if (u.uid) {
+        userByUid.set(u.uid, u);
+      }
       if (u.charName) {
         userByCharName.set(u.charName.trim().toLowerCase(), u);
       }
@@ -301,30 +311,36 @@ const MainDashboard: React.FC = () => {
     const myCanonicalChar = userProfile?.charName ? getCanonicalPlayerName(userProfile.charName).toLowerCase() : '';
 
     return reservations.map(r => {
-      if (!r.charName) return r;
-      const cleanName = r.charName.trim().toLowerCase();
-      const canonicalName = getCanonicalPlayerName(r.charName).toLowerCase();
-      const matched = userByCharName.get(cleanName) || userByCharName.get(canonicalName);
+      const isFixedSlot = Boolean(r.userUid?.startsWith('fixed-'));
+      const matchedByUid = !isFixedSlot && r.userUid ? userByUid.get(r.userUid) : undefined;
+      const cleanName = r.charName ? r.charName.trim().toLowerCase() : '';
+      const canonicalName = r.charName ? getCanonicalPlayerName(r.charName).toLowerCase() : '';
+      const matched =
+        matchedByUid ||
+        (isFixedSlot && cleanName ? userByCharName.get(cleanName) || userByCharName.get(canonicalName) : undefined);
 
       const resolvedUserUid = matched ? matched.uid : r.userUid;
       const resolvedRank = matched?.rank || r.userRank;
 
       if (!isAdmin) {
         const isOwn =
-          (Boolean(myUid) && (resolvedUserUid === myUid || r.userUid === myUid)) ||
-          (Boolean(myCleanChar) && (cleanName === myCleanChar || canonicalName === myCanonicalChar));
+          (Boolean(myUid) && resolvedUserUid === myUid) ||
+          (isFixedSlot &&
+            Boolean(myCleanChar) &&
+            Boolean(cleanName) &&
+            (cleanName === myCleanChar || canonicalName === myCanonicalChar));
         const isPartyMember = Boolean(myUid && r.partyMemberUids?.includes(myUid));
         const ownerSharesWithMe = Boolean(
           myUid &&
-          matched?.sharedWith &&
-          (matched.sharedWith.includes(myUid) || matched.sharedWith.includes('all'))
+            matched?.sharedWith &&
+            (matched.sharedWith.includes(myUid) || matched.sharedWith.includes('all'))
         );
-        const isPublic = Boolean(r.isPublicVisibility);
 
-        if (!isOwn && !isPartyMember && !ownerSharesWithMe && !isPublic) {
+        if (!r.charName || (!isOwn && !isPartyMember && !ownerSharesWithMe)) {
           return {
             ...r,
             userUid: resolvedUserUid,
+            isPublicVisibility: false,
             charName: '',
             userRank: undefined,
             partyMembers: undefined,
@@ -338,9 +354,13 @@ const MainDashboard: React.FC = () => {
           ...r,
           userUid: matched.uid,
           userRank: resolvedRank,
+          isPublicVisibility: false,
         };
       }
-      return r;
+      return {
+        ...r,
+        isPublicVisibility: false,
+      };
     });
   }, [reservations, usersList, isAdmin, currentUser?.uid, userProfile?.charName]);
 

@@ -135,7 +135,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   const checkIsOwner = (res?: Reservation | null): boolean => {
     if (!res || !currentUser) return false;
     if (res.userUid === currentUser.uid) return true;
-    if (userProfile?.charName && res.charName) {
+    if (res.userUid?.startsWith('fixed-') && userProfile?.charName && res.charName) {
       const myName = userProfile.charName.trim().toLowerCase();
       const myCanonical = getCanonicalPlayerName(userProfile.charName).toLowerCase();
       const resName = res.charName.trim().toLowerCase();
@@ -152,34 +152,33 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
 
   // Visibility Rule:
   // Admins and the slot owner can always view who is in the respawn.
-  // Regular members can ONLY view who is in the respawn if visibility was liberated:
+  // Regular members can ONLY view who is in the respawn if visibility was explicitly granted:
   // - Via the "Dê visibilidade" button (sharedWith includes current user or 'all')
-  // - Via party member assignment (partyMemberUids includes current user)
-  // - Via public reservation visibility flag (isPublicVisibility === true)
+  // - Via explicit party member assignment on this hunt (partyMemberUids includes current user)
   const checkCanSeeDetails = (res?: Reservation | null): boolean => {
     if (!res) return false;
+    if (!res.charName?.trim()) return false;
     if (isAdmin) return true;
     if (!currentUser) return false;
     if (checkIsOwner(res)) return true;
 
-    // 1. If reservation explicitly has public visibility turned on
-    if (res.isPublicVisibility === true) return true;
-
-    // 2. If current user is in party members
+    // 1. If current user is explicitly in this hunt's party members
     if (res.partyMemberUids && res.partyMemberUids.includes(currentUser.uid)) {
       return true;
     }
 
-    // 3. If owner liberated visibility via "Dê visibilidade" button in userProfile.sharedWith
+    // 2. If owner liberated visibility via "Dê visibilidade" button
+    const isFixed = Boolean(res.userUid?.startsWith('fixed-'));
     const canonicalResChar = getCanonicalPlayerName(res.charName).toLowerCase();
-    const owner = usersList.find(
-      u =>
-        u.uid === res.userUid ||
-        (res.charName &&
-          u.charName &&
-          (u.charName.trim().toLowerCase() === res.charName.trim().toLowerCase() ||
-            u.charName.trim().toLowerCase() === canonicalResChar))
-    );
+    const owner = !isFixed
+      ? usersList.find(u => u.uid === res.userUid)
+      : usersList.find(
+          u =>
+            res.charName &&
+            u.charName &&
+            (u.charName.trim().toLowerCase() === res.charName.trim().toLowerCase() ||
+              u.charName.trim().toLowerCase() === canonicalResChar)
+        );
 
     if (owner && owner.sharedWith && owner.sharedWith.length > 0) {
       if (owner.sharedWith.includes('all') || owner.sharedWith.includes(currentUser.uid)) {
@@ -1095,7 +1094,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                                     title={
                                       isOwner && !isAdmin
                                         ? `Sua reserva (${res.charName}) - Clique para editar ou liberar`
-                                        : `Reservado por ${res.charName} (${res.userRank})`
+                                        : `Reservado por ${res.charName}${res.userRank ? ` (${res.userRank})` : ''}`
                                     }
                                     className={`w-full text-left p-1.5 rounded-lg border transition-all cursor-pointer group shadow-2xs ${
                                       isOwner
