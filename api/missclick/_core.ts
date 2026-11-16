@@ -306,20 +306,55 @@ function parseTibiaXp(str: string): number {
   return parseInt(digits, 10) || 0;
 }
 
+const DEFAULT_MISSCLICK_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+let missclickSessionCookie = '__session=1';
+
+async function fetchMissclickPage(url: string): Promise<Response> {
+  const buildHeaders = (cookie: string) => ({
+    'User-Agent': DEFAULT_MISSCLICK_UA,
+    ...(cookie ? { Cookie: cookie } : {}),
+  });
+
+  const res = await fetch(url, {
+    headers: buildHeaders(missclickSessionCookie),
+    redirect: 'manual',
+  });
+
+  if (res.status >= 300 && res.status < 400) {
+    const setCookieHeader = res.headers.get('set-cookie');
+    if (setCookieHeader) {
+      const cookiePair = setCookieHeader.split(';')[0]?.trim();
+      if (cookiePair) {
+        missclickSessionCookie = cookiePair;
+      }
+    }
+    const location = res.headers.get('location') || '';
+    // If redirected to onboarding (/guia), retry the original target URL with the session cookie;
+    // otherwise follow the redirect target (e.g., canonical player slug).
+    const retryUrl = location && !location.includes('/guia')
+      ? new URL(location, url).toString()
+      : url;
+    return fetch(retryUrl, {
+      headers: buildHeaders(missclickSessionCookie),
+      redirect: 'follow',
+    });
+  }
+
+  return res;
+}
+
 async function scrapePlayerYesterdayExp(charName: string) {
   try {
-    const res = await fetch(`https://missclick-league.web.app/players/${encodeURIComponent(charName)}`, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
+    const res = await fetchMissclickPage(
+      `https://missclick-league.web.app/players/${encodeURIComponent(charName)}`
+    );
     if (!res.ok) return null;
     const text = await res.text();
 
     const m =
-      text.match(/XP\s+(\d{2}\/\d{2}\/\d{4})[\s\S]{1,160}?children\\?":\\?"([^"\\]+)/i) ||
-      text.match(/XP\s+(\d{2}\/\d{2}\/\d{4})<\/p><p[^>]*>([^<]+)<\/p>/i);
+      text.match(/XP\s+(\d{2}\/\d{2}\/\d{4})[\s\S]{1,200}?children\\?":\\?"([^"\\]+)/i) ||
+      text.match(/XP\s+(\d{2}\/\d{2}\/\d{4})<\/p>\s*<p[^>]*>([^<]+)<\/p>/i);
 
     let yesterdayExp = 0;
     let formattedXp = '';
@@ -356,12 +391,7 @@ async function fetchLeaderboardPlayersFallback(): Promise<
   Array<{ name: string; level?: number; vocation?: string }>
 > {
   try {
-    const res = await fetch('https://missclick-league.web.app/leaderboard/daily', {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
+    const res = await fetchMissclickPage('https://missclick-league.web.app/leaderboard/daily');
     if (res.ok) {
       const html = await res.text();
       const rowRegex =
