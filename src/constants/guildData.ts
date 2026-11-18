@@ -92,7 +92,7 @@ export const PLANILHADOS_RESPAWNS: string[] = [
 export const PLANILHADOS_SLOTS_MAP: Record<string, string[]> = {
   'Darklight Core': ['18:00h – 20:00h', '20:00h – 22:30h'],
   'Forgotten Crypt': ['19:30h – 22:00h'],
-  'Gloom Pillars': ['06:15h – 08:30h', '08:30h – 12:00h', '19:15h – 22:30h', '21:00h – 23:00h', '22:30h – 01:00h'],
+  'Gloom Pillars': ['06:15h – 08:30h', '08:30h – 12:00h', '19:15h – 22:30h', '19:20h – 22:00h', '22:00h – 01:20h', '22:30h – 01:00h'],
   'Jaded Roots': ['06:10h – 09:20h', '09:20h – 13:00h', '14:30h – 18:10h', '19:30h – 22:15h', '22:15h – 00:30h'],
   'Monster Graveyard Direita': ['06:30h – 08:00h'],
   'Monster Graveyard Esquerda': ['05:20h – 08:00h', '08:00h – 09:00h', '09:00h – 12:00h', '16:00h – 18:00h', '19:00h – 21:30h'],
@@ -105,8 +105,8 @@ export const PLANILHADOS_SLOTS_MAP: Record<string, string[]> = {
 export const PLANILHADOS_SLOTS_BY_DAY: Partial<Record<string, Partial<Record<HuntDay, string[]>>>> = {
   'Gloom Pillars': {
     friday: ['06:15h – 08:30h', '08:30h – 12:00h', '19:15h – 22:30h', '22:30h – 01:00h'],
-    saturday: ['21:00h – 23:00h'],
-    sunday: ['21:00h – 23:00h'],
+    saturday: ['19:20h – 22:00h', '22:00h – 01:20h'],
+    sunday: ['19:20h – 22:00h', '22:00h – 01:20h'],
   },
 };
 
@@ -314,7 +314,7 @@ export const SPECIAL_SCHEDULE_PLAYERS: SpecialPlayerRosterItem[] = [
   { charName: 'Lady Blackarrow', respawnsSummary: 'Gloom Pillars (06:15–08:30 Sex)', suggestedRank: 'Guardian' },
   { charName: 'Matshow Megalomaniaco', respawnsSummary: 'Sparkling Pools (06:20–09:00 Sex)', suggestedRank: 'Member' },
   { charName: 'Mestre Nolol', respawnsSummary: 'Darklight Core (18:00–20:00 Sex/Sáb/Dom)', suggestedRank: 'Challenger' },
-  { charName: 'Metaleiro Veeloz', respawnsSummary: 'Gloom Pillars (19:15–22:30 Sex)', suggestedRank: 'Leader' },
+  { charName: 'Metaleiro Veeloz', respawnsSummary: 'Gloom Pillars (19:15–22:30 Sex, 19:20–22:00 Sáb/Dom)', suggestedRank: 'Leader' },
   { charName: 'Moonryel', respawnsSummary: 'Souls Fire Raid (13:00–14:00 e 23:00–01:30 Sex/Sáb/Dom)', suggestedRank: 'Member' },
   { charName: 'Pari Suave', respawnsSummary: 'Darklight Core (20:00–22:30 Sex)', suggestedRank: 'Challenger' },
   { charName: 'Prezord', respawnsSummary: 'Forgotten Crypt (19:30–22:00 Sex/Sáb/Dom)', suggestedRank: 'Beginner' },
@@ -325,7 +325,7 @@ export const SPECIAL_SCHEDULE_PLAYERS: SpecialPlayerRosterItem[] = [
   { charName: 'Teko Brand', respawnsSummary: 'Jaded Roots (06:10–09:20 Sex/Sáb/Dom)', suggestedRank: 'Leader' },
   { charName: 'Theresa Fisher', respawnsSummary: 'Souls Thais (19:30–22:00 Sex)', suggestedRank: 'Guardian' },
   { charName: 'Urrk', respawnsSummary: 'Monster Graveyard Esquerda (16:00–18:00 Dom, 19:00–21:30 Sex)', suggestedRank: 'Challenger' },
-  { charName: 'Xbloodyx', respawnsSummary: 'Gloom Pillars (21:00–23:00 Sáb/Dom, 22:30–01:00 Sex)', suggestedRank: 'Leader' },
+  { charName: 'Xbloodyx', respawnsSummary: 'Gloom Pillars (22:00–01:20 Sáb/Dom, 22:30–01:00 Sex)', suggestedRank: 'Leader' },
 ];
 
 export const normalizeRespawnName = (name?: string): string =>

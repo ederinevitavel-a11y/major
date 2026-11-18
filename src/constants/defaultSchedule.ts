@@ -429,8 +429,9 @@ export const DEFAULT_FIXED_SCHEDULE: FixedScheduleItem[] = [
   // 1. Lady Blackarrow | 06:15–08:30 | Sexta
   // 2. Ragha Healer | 08:30–12:00 | Sexta
   // 3. Metaleiro Veeloz | 19:15–22:30 | Sexta
-  // 4. Xbloodyx | 21:00–23:00 | Sábado e Domingo
-  // 5. Xbloodyx | 22:30–01:00 | Sexta
+  // 4. Metaleiro Veeloz | 19:20–22:00 | Sábado e Domingo
+  // 5. Xbloodyx | 22:00–01:20 | Sábado e Domingo
+  // 6. Xbloodyx | 22:30–01:00 | Sexta
   // ==========================================
   // --- Lady Blackarrow (06:15–08:30) ---
   {
@@ -464,7 +465,7 @@ export const DEFAULT_FIXED_SCHEDULE: FixedScheduleItem[] = [
     reservedAt: new Date().toISOString(),
   },
 
-  // --- Metaleiro Veeloz (19:15–22:30) ---
+  // --- Metaleiro Veeloz (19:15–22:30 | Sexta) ---
   {
     id: 'fixed-b3-metaleiro-fri-1',
     day: 'friday',
@@ -480,18 +481,48 @@ export const DEFAULT_FIXED_SCHEDULE: FixedScheduleItem[] = [
     reservedAt: new Date().toISOString(),
   },
 
-  // --- Xbloodyx (21:00–23:00 | Sáb e Dom) ---
+  // --- Metaleiro Veeloz (19:20–22:00 | Sáb e Dom) ---
+  {
+    id: 'fixed-b3-metaleiro-sat-1',
+    day: 'saturday',
+    slotType: 'planilhados',
+    respawnName: 'Gloom Pillars',
+    timeSlot: '19:20h – 22:00h',
+    charName: 'Metaleiro Veeloz',
+    userRank: 'Leader',
+    userUid: 'fixed-metaleiro',
+    notes: 'Horário Planilhado: 19:20 – 22:00',
+    exactTime: '19:20 – 22:00',
+    isOccupied: true,
+    reservedAt: new Date().toISOString(),
+  },
+  {
+    id: 'fixed-b3-metaleiro-sun-1',
+    day: 'sunday',
+    slotType: 'planilhados',
+    respawnName: 'Gloom Pillars',
+    timeSlot: '19:20h – 22:00h',
+    charName: 'Metaleiro Veeloz',
+    userRank: 'Leader',
+    userUid: 'fixed-metaleiro',
+    notes: 'Horário Planilhado: 19:20 – 22:00',
+    exactTime: '19:20 – 22:00',
+    isOccupied: true,
+    reservedAt: new Date().toISOString(),
+  },
+
+  // --- Xbloodyx (22:00–01:20 | Sáb e Dom) ---
   {
     id: 'fixed-b3-xbloodyx1-sat-1',
     day: 'saturday',
     slotType: 'planilhados',
     respawnName: 'Gloom Pillars',
-    timeSlot: '21:00h – 23:00h',
+    timeSlot: '22:00h – 01:20h',
     charName: 'Xbloodyx',
     userRank: 'Leader',
     userUid: 'fixed-xbloodyx',
-    notes: 'Horário Planilhado: 21:00 – 23:00',
-    exactTime: '21:00 – 23:00',
+    notes: 'Horário Planilhado: 22:00 – 01:20',
+    exactTime: '22:00 – 01:20',
     isOccupied: true,
     reservedAt: new Date().toISOString(),
   },
@@ -500,12 +531,12 @@ export const DEFAULT_FIXED_SCHEDULE: FixedScheduleItem[] = [
     day: 'sunday',
     slotType: 'planilhados',
     respawnName: 'Gloom Pillars',
-    timeSlot: '21:00h – 23:00h',
+    timeSlot: '22:00h – 01:20h',
     charName: 'Xbloodyx',
     userRank: 'Leader',
     userUid: 'fixed-xbloodyx',
-    notes: 'Horário Planilhado: 21:00 – 23:00',
-    exactTime: '21:00 – 23:00',
+    notes: 'Horário Planilhado: 22:00 – 01:20',
+    exactTime: '22:00 – 01:20',
     isOccupied: true,
     reservedAt: new Date().toISOString(),
   },

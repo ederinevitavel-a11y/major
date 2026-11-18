@@ -517,13 +517,7 @@ export function subscribeToReservations(
         if ((s.timeSlot || '').includes('20:40')) return false;
       }
       if (cleanRespawn === 'gloom pillars' && (s.day === 'saturday' || s.day === 'sunday')) {
-        const detail = detailsMap.get(s.id);
-        const charName = (detail?.charName || (s as unknown as { charName?: string }).charName || '').trim().toLowerCase();
-        const isXbloodyxDoc =
-          s.id.toLowerCase().includes('xbloodyx') ||
-          s.userUid === 'fixed-xbloodyx' ||
-          charName === 'xbloodyx';
-        if (isXbloodyxDoc && (s.timeSlot || '').includes('19:15')) {
+        if ((s.timeSlot || '').includes('19:15') || (s.timeSlot || '').includes('21:00')) {
           return false;
         }
       }
@@ -995,6 +989,64 @@ export async function sanitizeLegacyReservations(): Promise<number> {
     }
   } catch (auditErr) {
     console.warn('Automatic visibility privacy audit notice:', auditErr);
+  }
+
+  // One-time cleanup for Gloom Pillars Sat/Sun update (19:20-22:00 Metaleiro Veeloz, 22:00-01:20 Xbloodyx)
+  try {
+    const gloomV3SessionKey = 'major_gloom_sat_sun_v3';
+    if (sessionStorage.getItem(gloomV3SessionKey) !== '1') {
+      const gloomV3Ref = doc(db, 'settings', 'gloom_pillars_sat_sun_v3');
+      const gloomV3Snap = await getDoc(gloomV3Ref);
+      if (!gloomV3Snap.exists()) {
+        const slotsSnap = await getDocs(collection(db, 'reservations'));
+
+        const gloomV3Batch = writeBatch(db);
+        let gloomV3Removed = 0;
+
+        for (const d of slotsSnap.docs) {
+          const data = d.data() as Record<string, unknown>;
+          const respawnName = String(data.respawnName || '').replace(/^[A-Z0-9]+\s*—\s*/, '').trim().toLowerCase();
+          const day = String(data.day || '');
+          const timeSlot = String(data.timeSlot || '');
+
+          const isOldWeekendSlot =
+            respawnName === 'gloom pillars' &&
+            (day === 'saturday' || day === 'sunday') &&
+            (timeSlot.includes('19:15') || timeSlot.includes('21:00'));
+
+          if (isOldWeekendSlot) {
+            gloomV3Batch.delete(d.ref);
+            gloomV3Batch.delete(doc(db, 'reservation_details', d.id));
+            gloomV3Removed++;
+          }
+        }
+
+        // Ensure old weekend overrides in deleted_fixed_reservations don't hide the updated Sat/Sun schedule
+        gloomV3Batch.set(
+          doc(db, 'settings', 'deleted_fixed_reservations'),
+          {
+            ids: arrayRemove(
+              'fixed-b3-xbloodyx1-sat-1',
+              'fixed-b3-xbloodyx1-sun-1',
+              'fixed-b3-metaleiro-sat-1',
+              'fixed-b3-metaleiro-sun-1'
+            ),
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+
+        gloomV3Batch.set(gloomV3Ref, {
+          migratedAt: new Date().toISOString(),
+          removedCount: gloomV3Removed,
+        });
+        await gloomV3Batch.commit();
+        totalFixed += gloomV3Removed;
+      }
+      sessionStorage.setItem(gloomV3SessionKey, '1');
+    }
+  } catch (gloomErr) {
+    console.warn('Automatic Gloom Pillars Sat/Sun migration notice:', gloomErr);
   }
 
   const sessionKey = 'major_legacy_sanitized_v2';
