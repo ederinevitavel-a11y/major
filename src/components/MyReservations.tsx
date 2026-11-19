@@ -182,21 +182,56 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
     fetchCharacterXpAuto();
   }, [userProfile?.charName]);
 
-  // Fetch XP for all tracked players (Yesterday's Exp)
+  const usersListRef = React.useRef(usersList);
+  usersListRef.current = usersList;
+  const trackedCharMapRef = React.useRef(trackedCharMap);
+  trackedCharMapRef.current = trackedCharMap;
+
+  const trackedCharsKey = trackedUids
+    .map(uid => {
+      const u = usersList.find(item => item.uid === uid);
+      return `${uid}:${u?.charName || ''}`;
+    })
+    .join('|');
+
+  // Fetch XP for newly added tracked players (avoid re-fetching on unrelated usersList updates like presence heartbeats)
   useEffect(() => {
+    let cancelled = false;
     const fetchTrackedPlayersXp = async () => {
       if (!trackedUids || trackedUids.length === 0) {
         setTrackedCharMap({});
         return;
       }
-      setLoadingTracked(true);
-      const newMap: Record<string, TibiaCharacterInfo> = {};
+
+      const currentMap = trackedCharMapRef.current;
+      const nextMap: Record<string, TibiaCharacterInfo> = {};
+      const missingUids: string[] = [];
+
       for (const uid of trackedUids) {
-        const u = usersList.find(item => item.uid === uid);
+        if (currentMap[uid]) {
+          nextMap[uid] = currentMap[uid];
+        } else {
+          missingUids.push(uid);
+        }
+      }
+
+      if (missingUids.length === 0) {
+        if (Object.keys(currentMap).length !== Object.keys(nextMap).length) {
+          setTrackedCharMap(nextMap);
+        }
+        return;
+      }
+
+      setLoadingTracked(true);
+      for (const uid of missingUids) {
+        if (cancelled) break;
+        const u = usersListRef.current.find(item => item.uid === uid);
         if (u && u.charName) {
           try {
-            const hsData = await fetchCharacterHighscores(u.charName);
-            const info = await fetchCharacter(u.charName);
+            const [hsData, info] = await Promise.all([
+              fetchCharacterHighscores(u.charName),
+              fetchCharacter(u.charName),
+            ]);
 
             const yesterdayExp = typeof hsData?.yesterdayExp === 'number'
               ? hsData.yesterdayExp
@@ -206,7 +241,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               ? hsData.exp_yesterday
               : undefined;
 
-            newMap[uid] = {
+            nextMap[uid] = {
               name: info?.name || hsData?.name || u.charName,
               level: info?.level || hsData?.level || u.level,
               experience: info?.experience || 0,
@@ -220,12 +255,17 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
           }
         }
       }
-      setTrackedCharMap(newMap);
-      setLoadingTracked(false);
+      if (!cancelled) {
+        setTrackedCharMap(nextMap);
+        setLoadingTracked(false);
+      }
     };
 
     fetchTrackedPlayersXp();
-  }, [trackedUids, usersList]);
+    return () => {
+      cancelled = true;
+    };
+  }, [trackedCharsKey]);
 
   const updateTrackedUids = async (updated: string[]) => {
     setTrackedUids(updated);

@@ -318,6 +318,7 @@ service cloud.firestore {
         (isAdmin() || (
           isOwner(userId) &&
           incoming().isAdmin == false &&
+          incoming().rank != 'Leader' &&
           incoming().email.lower() == request.auth.token.email.lower()
         ));
       allow update: if isWhitelisted() &&
@@ -346,6 +347,7 @@ service cloud.firestore {
         isValidMemberDirectory(incoming(), userId) &&
         (isAdmin() || (
           isOwner(userId) &&
+          incoming().rank != 'Leader' &&
           (!exists(/databases/$(database)/documents/users/$(userId)) || (
             incoming().charName == get(/databases/$(database)/documents/users/$(userId)).data.charName &&
             incoming().rank == get(/databases/$(database)/documents/users/$(userId)).data.rank
@@ -437,13 +439,12 @@ service cloud.firestore {
       allow write: if isAdmin() && isValidId(settingId);
     }
 
-    // Double XP Records
+    // Double XP Records (Admin-synced only)
     match /double_xp_records/{recordId} {
       allow read: if isWhitelisted();
-      allow create, update: if isWhitelisted() &&
+      allow create, update: if isAdmin() &&
         isValidId(recordId) &&
-        isValidDoubleXpRecord(incoming(), recordId) &&
-        (isAdmin() || request.auth.uid == recordId);
+        isValidDoubleXpRecord(incoming(), recordId);
       allow delete: if isAdmin() && isValidId(recordId);
     }
 
@@ -471,7 +472,13 @@ service cloud.firestore {
       allow create: if isWhitelisted() &&
         isValidId(releasedId) &&
         isValidReleasedRespawn(incoming(), releasedId) &&
-        (isAdmin() || incoming().userUid == request.auth.uid);
+        (isAdmin() || (
+          incoming().userUid == request.auth.uid &&
+          'claimReservationId' in incoming() &&
+          releasedId == incoming().claimReservationId &&
+          (!exists(/databases/$(database)/documents/reservations/$(incoming().claimReservationId)) ||
+           get(/databases/$(database)/documents/reservations/$(incoming().claimReservationId)).data.userUid == request.auth.uid)
+        ));
       allow update: if isAdmin() &&
         isValidId(releasedId) &&
         isValidReleasedRespawn(incoming(), releasedId);

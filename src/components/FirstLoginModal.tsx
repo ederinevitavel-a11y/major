@@ -59,12 +59,15 @@ export const FirstLoginModal: React.FC = () => {
     setError(null);
 
     try {
+      const initialRank: PriorityRank =
+        !isSuperAdmin && verifiedMember.rank === 'Leader' ? 'Challenger' : verifiedMember.rank;
+
       await saveUserProfile({
         uid: currentUser.uid,
         email: currentUser.email || '',
         charName: verifiedMember.member.name,
         guildName: verifiedMember.guildName,
-        rank: verifiedMember.rank,
+        rank: initialRank,
         vocation: verifiedMember.member.vocation || 'Unknown',
         level: Number(verifiedMember.member.level) || 0,
         isAdmin: isSuperAdmin,

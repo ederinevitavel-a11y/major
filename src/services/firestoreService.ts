@@ -1411,16 +1411,16 @@ export async function getReleasedRespawns(): Promise<ReleasedRespawn[]> {
 }
 
 export async function addReleasedRespawn(data: Omit<ReleasedRespawn, 'id'>): Promise<void> {
-  const id = `${data.day}_${data.respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${data.timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}_${Date.now()}`;
   const claimReservationId =
     data.claimReservationId ||
     `${data.day}_${data.respawnName.replace(/[^a-zA-Z0-9]/g, '-')}_${data.timeSlot.replace(/[^a-zA-Z0-9]/g, '-')}`;
+  const id = claimReservationId.slice(0, 128);
   const path = `released_respawns/${id}`;
   try {
     await setDoc(doc(db, 'released_respawns', id), cleanData({
       ...data,
       id,
-      claimReservationId,
+      claimReservationId: id,
     } as unknown as Record<string, unknown>));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);

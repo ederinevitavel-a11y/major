@@ -69,13 +69,17 @@ const SUPER_ADMIN_EMAILS = new Set(['ederinevitavel@gmail.com', 'admissclick@gma
 const API_BASE = 'https://missclick-league.web.app/api/v1';
 const VALID_CHAR_NAME_REGEX = /^[a-zA-Z0-9\s'._-]+$/;
 const CACHE_TTL_MS = 3 * 60 * 1000;
+const CHAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const FORCE_REFRESH_COOLDOWN_MS = 30 * 1000;
+const UPSTREAM_TIMEOUT_MS = 8000;
 
 let googleCertsCache: { certs: Record<string, string>; expiresAt: number } | null = null;
 const whitelistCache = new Map<string, { authorized: boolean; isAdmin: boolean; expiresAt: number }>();
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const ipAuthFailMap = new Map<string, { count: number; resetAt: number }>();
 const forceRefreshByUser = new Map<string, number>();
 const guildHighscoresCache = new Map<string, { data: any; timestamp: number }>();
+const characterHighscoresCache = new Map<string, { data: any; timestamp: number }>();
 let apiRateLimitedUntil = 0;
 
 function decodeBase64Url(input: string): Buffer {
@@ -227,7 +231,30 @@ function pruneMapIfLarge<K, V>(map: Map<K, V>, isExpired: (v: V) => boolean, max
   }
 }
 
-function checkUserRateLimit(uid: string, limit = 40, windowMs = 60_000): boolean {
+function getClientIp(req: ApiRequest): string {
+  const fwd = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || '';
+  const raw = Array.isArray(fwd) ? fwd[0] || '' : fwd;
+  return raw.split(',')[0]?.trim().slice(0, 64) || 'unknown';
+}
+
+function isIpAuthBlocked(ip: string): boolean {
+  const now = Date.now();
+  const entry = ipAuthFailMap.get(ip);
+  return Boolean(entry && now <= entry.resetAt && entry.count >= 20);
+}
+
+function recordIpAuthFailure(ip: string): void {
+  const now = Date.now();
+  pruneMapIfLarge(ipAuthFailMap, v => now > v.resetAt);
+  const entry = ipAuthFailMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    ipAuthFailMap.set(ip, { count: 1, resetAt: now + 60_000 });
+  } else {
+    entry.count += 1;
+  }
+}
+
+function checkUserRateLimit(uid: string, limit = 25, windowMs = 60_000): boolean {
   const now = Date.now();
   pruneMapIfLarge(rateLimitMap, v => now > v.resetAt);
   pruneMapIfLarge(whitelistCache, v => now >= v.expiresAt);
@@ -253,35 +280,46 @@ export async function authenticateRequest(
   res: ApiResponse
 ): Promise<VerifiedFirebaseUser | null> {
   applySecurityHeaders(res);
+  const clientIp = getClientIp(req);
+  if (isIpAuthBlocked(clientIp)) {
+    sendJson(res, 429, { error: 'Muitas tentativas inválidas. Aguarde um minuto.' });
+    return null;
+  }
+
   try {
     const rawHeader = req.headers.authorization || req.headers.Authorization || '';
     const authHeader = Array.isArray(rawHeader) ? rawHeader[0] || '' : rawHeader;
-    const match = authHeader.match(/^Bearer\s+(.+)$/i);
-    if (!match) {
+    const match = authHeader.match(/^Bearer\s+([^\s]+)$/i);
+    if (!match || match[1].length > 4096) {
+      recordIpAuthFailure(clientIp);
       sendJson(res, 401, { error: 'Autenticação necessária.' });
       return null;
     }
     const idToken = match[1].trim();
     const verifiedUser = await verifyFirebaseIdToken(idToken);
     if (!verifiedUser) {
+      recordIpAuthFailure(clientIp);
       sendJson(res, 401, { error: 'Token de sessão inválido ou expirado.' });
       return null;
     }
     const access = await checkWhitelistAccess(verifiedUser, idToken);
     if (!access.authorized) {
+      recordIpAuthFailure(clientIp);
       sendJson(res, 403, { error: 'Usuário sem permissão na guilda.' });
       return null;
     }
-    if (!checkUserRateLimit(verifiedUser.uid)) {
+    const isEffectiveAdmin = verifiedUser.isAdmin || access.isAdmin;
+    if (!checkUserRateLimit(verifiedUser.uid, isEffectiveAdmin ? 50 : 25)) {
       sendJson(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
       return null;
     }
     return {
       ...verifiedUser,
-      isAdmin: verifiedUser.isAdmin || access.isAdmin,
+      isAdmin: isEffectiveAdmin,
     };
   } catch (err) {
     console.error('Auth middleware error:', err);
+    recordIpAuthFailure(clientIp);
     sendJson(res, 401, { error: 'Falha ao validar autenticação.' });
     return null;
   }
@@ -319,6 +357,7 @@ async function fetchMissclickPage(url: string): Promise<Response> {
   const res = await fetch(url, {
     headers: buildHeaders(missclickSessionCookie),
     redirect: 'manual',
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
 
   if (res.status >= 300 && res.status < 400) {
@@ -338,6 +377,7 @@ async function fetchMissclickPage(url: string): Promise<Response> {
     return fetch(retryUrl, {
       headers: buildHeaders(missclickSessionCookie),
       redirect: 'follow',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
   }
 
@@ -449,6 +489,9 @@ export async function handleMembersRequest(req: ApiRequest, res: ApiResponse) {
   }
   const user = await authenticateRequest(req, res);
   if (!user) return;
+  if (!user.isAdmin) {
+    return sendJson(res, 403, { error: 'Acesso restrito a administradores.' });
+  }
 
   const TOKEN = getApiToken();
   try {
@@ -497,6 +540,9 @@ export async function handleGuildHighscoresRequest(req: ApiRequest, res: ApiResp
   }
   const user = await authenticateRequest(req, res);
   if (!user) return;
+  if (!user.isAdmin) {
+    return sendJson(res, 403, { error: 'Acesso restrito a administradores.' });
+  }
 
   const TOKEN = getApiToken();
   try {
@@ -656,9 +702,17 @@ export async function handleCharacterHighscoresRequest(req: ApiRequest, res: Api
     }
     const cleanDay = /^[a-zA-Z0-9_-]{1,20}$/.test(rawDay) ? rawDay : undefined;
 
+    const now = Date.now();
+    const cacheKey = `${cleanName.toLowerCase()}::${cleanDay || ''}`;
+    const cached = characterHighscoresCache.get(cacheKey);
+    if (cached && now - cached.timestamp < CHAR_CACHE_TTL_MS) {
+      res.setHeader('Cache-Control', 'private, max-age=180');
+      return sendJson(res, 200, cached.data);
+    }
+
     let resultData: any = null;
 
-    if (TOKEN) {
+    if (TOKEN && now > apiRateLimitedUntil) {
       try {
         let url = `${API_BASE}/highscores?name=${encodeURIComponent(cleanName)}`;
         if (cleanDay) {
@@ -668,8 +722,11 @@ export async function handleCharacterHighscoresRequest(req: ApiRequest, res: Api
           headers: {
             Authorization: `Bearer ${TOKEN}`,
           },
+          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
         });
-        if (response.ok) {
+        if (response.status === 429) {
+          apiRateLimitedUntil = Date.now() + 10 * 60 * 1000;
+        } else if (response.ok) {
           resultData = await response.json();
         }
       } catch {
@@ -680,14 +737,21 @@ export async function handleCharacterHighscoresRequest(req: ApiRequest, res: Api
     if (!resultData || resultData.error || (!resultData.yesterdayExp && !resultData.expYesterday)) {
       const scraped = await scrapePlayerYesterdayExp(cleanName);
       if (scraped && scraped.yesterdayExp > 0) {
-        return sendJson(res, 200, {
+        const payload = {
           ...(resultData && !resultData.error ? resultData : {}),
           ...scraped,
-        });
+        };
+        pruneMapIfLarge(characterHighscoresCache, v => Date.now() - v.timestamp >= CHAR_CACHE_TTL_MS, 250);
+        characterHighscoresCache.set(cacheKey, { data: payload, timestamp: Date.now() });
+        res.setHeader('Cache-Control', 'private, max-age=180');
+        return sendJson(res, 200, payload);
       }
     }
 
     if (resultData && !resultData.error) {
+      pruneMapIfLarge(characterHighscoresCache, v => Date.now() - v.timestamp >= CHAR_CACHE_TTL_MS, 250);
+      characterHighscoresCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
+      res.setHeader('Cache-Control', 'private, max-age=180');
       return sendJson(res, 200, resultData);
     }
 
