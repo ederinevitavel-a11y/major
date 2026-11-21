@@ -118,6 +118,7 @@ interface ScheduleGridProps {
   customRespawns?: CustomRespawn[];
   initialDay?: HuntDay;
   initialSearch?: string;
+  hiddenDays?: HuntDay[];
 }
 
 export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
@@ -126,6 +127,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   customRespawns = [],
   initialDay,
   initialSearch,
+  hiddenDays = [],
 }) => {
   const { currentUser, isAdmin, userProfile } = useAuth();
   const isLeader = userProfile?.rank === 'Leader';
@@ -189,14 +191,28 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     return false;
   };
 
-  const [selectedDay, setSelectedDay] = useState<HuntDay>(initialDay || 'friday');
+  const visibleDaysConfig = DAYS_CONFIG.filter(d => !hiddenDays.includes(d.key));
+  const safeVisibleDays = visibleDaysConfig.length > 0 ? visibleDaysConfig : DAYS_CONFIG;
+
+  const [selectedDay, setSelectedDay] = useState<HuntDay>(() => {
+    if (initialDay && !hiddenDays.includes(initialDay)) return initialDay;
+    return safeVisibleDays[0]?.key || 'friday';
+  });
   const [slotType, setSlotType] = useState<SlotType>('normal');
   const [searchTerm, setSearchTerm] = useState(initialSearch || '');
   const [statusFilter, setStatusFilter] = useState<'all' | 'free' | 'reserved'>('all');
 
   useEffect(() => {
-    if (initialDay) setSelectedDay(initialDay);
-  }, [initialDay]);
+    if (initialDay && !hiddenDays.includes(initialDay)) {
+      setSelectedDay(initialDay);
+    }
+  }, [initialDay, hiddenDays]);
+
+  useEffect(() => {
+    if (!safeVisibleDays.some(d => d.key === selectedDay)) {
+      setSelectedDay(safeVisibleDays[0]?.key || 'friday');
+    }
+  }, [safeVisibleDays, selectedDay]);
 
   useEffect(() => {
     if (initialSearch !== undefined) setSearchTerm(initialSearch);
@@ -377,8 +393,16 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
           {/* Day selection and Respawn category toggle */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3">
             {/* Day Selector */}
-            <div className="grid grid-cols-3 sm:flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-full sm:w-auto">
-              {DAYS_CONFIG.map(d => (
+            <div
+              className={`grid sm:flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-full sm:w-auto ${
+                safeVisibleDays.length === 1
+                  ? 'grid-cols-1'
+                  : safeVisibleDays.length === 2
+                  ? 'grid-cols-2'
+                  : 'grid-cols-3'
+              }`}
+            >
+              {safeVisibleDays.map(d => (
                 <button
                   key={d.key}
                   onClick={() => setSelectedDay(d.key)}

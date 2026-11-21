@@ -22,6 +22,7 @@ interface MyReservationsProps {
   usersList: UserProfile[];
   onUpdateProfile?: () => Promise<void>;
   lfgPosts?: LfgPost[];
+  hiddenDays?: HuntDay[];
   onNavigateToLfg?: () => void;
 }
 
@@ -31,12 +32,22 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
   usersList,
   onUpdateProfile,
   lfgPosts = [],
+  hiddenDays = [],
   onNavigateToLfg,
 }) => {
   const { refreshProfile } = useAuth();
-  const [selectedDay, setSelectedDay] = useState<string>('friday');
+  const visibleDaysConfig = DAYS_CONFIG.filter(d => !hiddenDays.includes(d.key));
+  const safeVisibleDays = visibleDaysConfig.length > 0 ? visibleDaysConfig : DAYS_CONFIG;
+
+  const [selectedDay, setSelectedDay] = useState<string>(() => safeVisibleDays[0]?.key || 'friday');
   const [isLfgModalOpen, setIsLfgModalOpen] = useState(false);
   const [deletingLfg, setDeletingLfg] = useState(false);
+
+  useEffect(() => {
+    if (!safeVisibleDays.some(d => d.key === selectedDay)) {
+      setSelectedDay(safeVisibleDays[0]?.key || 'friday');
+    }
+  }, [safeVisibleDays, selectedDay]);
 
   const myLfgPost = lfgPosts.find(p => p.userUid === userProfile?.uid);
 
@@ -716,12 +727,9 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
               <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Dias Marcados</span>
                 <div className="flex items-center gap-1 mt-1">
-                  {[
-                    { key: 'friday' as HuntDay, label: 'SEX' },
-                    { key: 'saturday' as HuntDay, label: 'SÁB' },
-                    { key: 'sunday' as HuntDay, label: 'DOM' },
-                  ].map(d => {
+                  {safeVisibleDays.map(d => {
                     const active = myLfgPost.days && myLfgPost.days.includes(d.key);
+                    const shortLabel = d.key === 'friday' ? 'SEX' : d.key === 'saturday' ? 'SÁB' : 'DOM';
                     return (
                       <span
                         key={d.key}
@@ -731,7 +739,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
                             : 'bg-slate-200 dark:bg-slate-700 text-slate-400 opacity-40'
                         }`}
                       >
-                        {d.label}
+                        {shortLabel}
                       </span>
                     );
                   })}
@@ -791,8 +799,16 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
 
       <div className="space-y-4 sm:space-y-6">
           {/* Day Selector Tabs */}
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 bg-white dark:bg-slate-900 p-1.5 sm:p-2 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-            {DAYS_CONFIG.map(day => {
+          <div
+            className={`grid gap-1.5 sm:gap-2 bg-white dark:bg-slate-900 p-1.5 sm:p-2 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 ${
+              safeVisibleDays.length === 1
+                ? 'grid-cols-1'
+                : safeVisibleDays.length === 2
+                ? 'grid-cols-2'
+                : 'grid-cols-3'
+            }`}
+          >
+            {safeVisibleDays.map(day => {
               const totalDayCount = myReservations.filter(r => r.day === day.key).length + sharedReservations.filter(r => r.day === day.key).length;
               const isSelected = selectedDay === day.key;
 
@@ -1374,6 +1390,7 @@ export const MyReservations: React.FC<MyReservationsProps> = ({
         onClose={() => setIsLfgModalOpen(false)}
         userProfile={userProfile}
         existingPost={myLfgPost}
+        hiddenDays={hiddenDays}
       />
     </div>
   );

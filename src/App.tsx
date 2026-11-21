@@ -24,10 +24,11 @@ import {
   subscribeToCustomRespawns,
   subscribeToReleasedRespawns,
   subscribeToLfgPosts,
+  subscribeToHiddenDays,
   reconcileFixedReservationsWithUsers,
 } from './services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from './services/tibiaDataService';
-import { DEFAULT_GUILDS, getCanonicalPlayerName } from './constants/guildData';
+import { DEFAULT_GUILDS, DAYS_CONFIG, getCanonicalPlayerName } from './constants/guildData';
 import { Reservation, UserProfile, CustomRespawn, ReleasedRespawn, HuntDay, LfgPost, MainTab } from './types';
 import {
   Sparkles,
@@ -56,6 +57,7 @@ const MainDashboard: React.FC = () => {
   const [customRespawns, setCustomRespawns] = useState<CustomRespawn[]>([]);
   const [releasedRespawns, setReleasedRespawns] = useState<ReleasedRespawn[]>([]);
   const [lfgPosts, setLfgPosts] = useState<LfgPost[]>([]);
+  const [hiddenDays, setHiddenDays] = useState<HuntDay[]>([]);
   const [scheduleDay, setScheduleDay] = useState<HuntDay>('friday');
   const [scheduleSearch, setScheduleSearch] = useState<string>('');
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -82,6 +84,7 @@ const MainDashboard: React.FC = () => {
       setCustomRespawns([]);
       setReleasedRespawns([]);
       setLfgPosts([]);
+      setHiddenDays([]);
       hasSyncedDirectoryRef.current = false;
       return;
     }
@@ -128,11 +131,18 @@ const MainDashboard: React.FC = () => {
       err => console.warn('Erro ao sincronizar Quero Hunt:', err)
     );
 
+    // Real-time subscription to Admin hidden days config
+    const unsubHiddenDays = subscribeToHiddenDays(
+      days => setHiddenDays(days),
+      err => console.warn('Erro ao sincronizar dias ocultos:', err)
+    );
+
     return () => {
       unsubUsers();
       unsubCustom();
       unsubReleased();
       unsubLfg();
+      unsubHiddenDays();
     };
   }, [loading, currentUser, isAuthorized, isAdmin, needsCharacterLink, profileLoadError]);
 
@@ -364,6 +374,34 @@ const MainDashboard: React.FC = () => {
     });
   }, [reservations, usersList, isAdmin, currentUser?.uid, userProfile?.charName]);
 
+  // Auto-switch scheduleDay if the currently selected day gets hidden by Admin
+  useEffect(() => {
+    if (hiddenDays.includes(scheduleDay)) {
+      const firstVisible = DAYS_CONFIG.find(d => !hiddenDays.includes(d.key))?.key;
+      if (firstVisible) {
+        setScheduleDay(firstVisible);
+      }
+    }
+  }, [hiddenDays, scheduleDay]);
+
+  const visibleReservations = useMemo(
+    () => linkedReservations.filter(r => !hiddenDays.includes(r.day)),
+    [linkedReservations, hiddenDays]
+  );
+
+  const visibleReleasedRespawns = useMemo(
+    () => releasedRespawns.filter(r => !hiddenDays.includes(r.day)),
+    [releasedRespawns, hiddenDays]
+  );
+
+  const visibleLfgPosts = useMemo(
+    () =>
+      lfgPosts.filter(
+        post => !post.days || post.days.length === 0 || post.days.some(d => !hiddenDays.includes(d))
+      ),
+    [lfgPosts, hiddenDays]
+  );
+
   // Loading state
   if (loading) {
     return (
@@ -562,44 +600,48 @@ const MainDashboard: React.FC = () => {
           setCurrentTab(tab);
         }}
         onOpenExport={() => setIsExportOpen(true)}
-        releasedCount={releasedRespawns.length}
-        lfgCount={lfgPosts.length}
+        releasedCount={visibleReleasedRespawns.length}
+        lfgCount={visibleLfgPosts.length}
       />
 
       <main className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-3.5 sm:py-6 space-y-4 sm:space-y-5 overflow-x-hidden">
         {/* KPI Stats overview */}
         <StatsCards
-          reservations={linkedReservations}
+          reservations={visibleReservations}
           users={usersList}
           isAdmin={isAdmin}
+          hiddenDays={hiddenDays}
         />
 
         {/* Dynamic Tab Content */}
         {currentTab === 'schedule' && (
           <ScheduleGrid
-            reservations={linkedReservations}
+            reservations={visibleReservations}
             usersList={usersList}
             customRespawns={customRespawns}
             initialDay={scheduleDay}
             initialSearch={scheduleSearch}
+            hiddenDays={hiddenDays}
           />
         )}
 
         {/* Nova aba Quero Hunt! — cards de jogadores sem PT para a double */}
         {currentTab === 'lfg' && (
           <QueroHuntTab
-            posts={lfgPosts}
+            posts={visibleLfgPosts}
             userProfile={userProfile}
+            hiddenDays={hiddenDays}
             onNavigateToMyControls={() => setCurrentTab('my-schedule')}
           />
         )}
 
         {currentTab === 'released' && (
           <ReleasedRespawnsTab
-            releasedList={releasedRespawns}
+            releasedList={visibleReleasedRespawns}
             usersList={usersList}
+            hiddenDays={hiddenDays}
             onNavigateToSchedule={(day, respawnName) => {
-              if (day) setScheduleDay(day);
+              if (day && !hiddenDays.includes(day)) setScheduleDay(day);
               if (respawnName) setScheduleSearch(respawnName);
               setCurrentTab('schedule');
             }}
@@ -608,11 +650,12 @@ const MainDashboard: React.FC = () => {
 
         {currentTab === 'my-schedule' && (
           <MyReservations
-            reservations={linkedReservations}
+            reservations={visibleReservations}
             userProfile={userProfile}
             usersList={usersList}
             onUpdateProfile={refreshUsers}
             lfgPosts={lfgPosts}
+            hiddenDays={hiddenDays}
             onNavigateToLfg={() => setCurrentTab('lfg')}
           />
         )}
@@ -624,6 +667,7 @@ const MainDashboard: React.FC = () => {
             onRefreshUsers={refreshUsers}
             customRespawns={customRespawns}
             releasedRespawns={releasedRespawns}
+            hiddenDays={hiddenDays}
           />
         )}
       </main>
@@ -636,7 +680,8 @@ const MainDashboard: React.FC = () => {
       {/* Export Schedule Modal */}
       {isExportOpen && (
         <ExportModal
-          reservations={linkedReservations}
+          reservations={visibleReservations}
+          hiddenDays={hiddenDays}
           onClose={() => setIsExportOpen(false)}
         />
       )}

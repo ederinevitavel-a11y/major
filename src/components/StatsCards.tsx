@@ -1,5 +1,5 @@
 import React from 'react';
-import { Reservation, UserProfile } from '../types';
+import { HuntDay, Reservation, UserProfile } from '../types';
 import { NORMAL_RESPAWNS, NORMAL_TIME_SLOTS, THREE_HOUR_RESPAWNS, THREE_HOUR_TIME_SLOTS } from '../constants/guildData';
 import { Flame, Clock, Users, CheckCircle2 } from 'lucide-react';
 
@@ -7,28 +7,32 @@ interface StatsCardsProps {
   reservations: Reservation[];
   users: UserProfile[];
   isAdmin?: boolean;
+  hiddenDays?: HuntDay[];
 }
 
 export const StatsCards: React.FC<StatsCardsProps> = ({
   reservations,
   users,
   isAdmin = false,
+  hiddenDays = [],
 }) => {
-  const totalNormalSlots = 3 * NORMAL_RESPAWNS.length * NORMAL_TIME_SLOTS.length;
-  const total3hSlots = 3 * THREE_HOUR_RESPAWNS.length * THREE_HOUR_TIME_SLOTS.length;
+  const visibleDayCount = Math.max(1, 3 - hiddenDays.length);
+  const visibleReservations = reservations.filter(r => !hiddenDays.includes(r.day));
+  const totalNormalSlots = visibleDayCount * NORMAL_RESPAWNS.length * NORMAL_TIME_SLOTS.length;
+  const total3hSlots = visibleDayCount * THREE_HOUR_RESPAWNS.length * THREE_HOUR_TIME_SLOTS.length;
   const totalAvailableSlots = totalNormalSlots + total3hSlots;
 
-  const totalBooked = reservations.length;
+  const totalBooked = visibleReservations.length;
   const freeSlots = Math.max(0, totalAvailableSlots - totalBooked);
   const occupancyPercentage = Math.min(100, Math.round((totalBooked / Math.max(1, totalAvailableSlots)) * 100));
 
   const respawnCounts: Record<string, number> = {};
-  reservations.forEach(r => {
+  visibleReservations.forEach(r => {
     respawnCounts[r.respawnName] = (respawnCounts[r.respawnName] || 0) + 1;
   });
   const topRespawn = Object.entries(respawnCounts).sort((a, b) => b[1] - a[1])[0];
 
-  const uniqueHunters = new Set(reservations.map(r => r.userUid || r.charName)).size;
+  const uniqueHunters = new Set(visibleReservations.map(r => r.userUid || r.charName)).size;
   const memberCountDisplay = isAdmin ? users.length : uniqueHunters;
   const memberCountLabel = isAdmin ? 'vinculados' : 'Jogadores';
 
@@ -38,7 +42,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       <div className="rounded-2xl border border-slate-200/90 bg-white p-3.5 sm:p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-all hover:shadow-md min-w-0">
         <div className="flex items-center justify-between mb-2 sm:mb-3 gap-1">
           <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 truncate">
-            Ocupação do Fds
+            {visibleDayCount === 3 ? 'Ocupação do Fds' : `Ocupação (${visibleDayCount} ${visibleDayCount === 1 ? 'Dia' : 'Dias'})`}
           </span>
           <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
             <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />

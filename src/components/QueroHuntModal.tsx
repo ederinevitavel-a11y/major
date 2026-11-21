@@ -17,11 +17,14 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
+import { DAYS_CONFIG } from '../constants/guildData';
+
 interface QueroHuntModalProps {
   isOpen: boolean;
   onClose: () => void;
   userProfile: UserProfile | null;
   existingPost?: LfgPost | null;
+  hiddenDays?: HuntDay[];
   onSuccess?: (msg: string) => void;
 }
 
@@ -30,13 +33,17 @@ export const QueroHuntModal: React.FC<QueroHuntModalProps> = ({
   onClose,
   userProfile,
   existingPost,
+  hiddenDays = [],
   onSuccess,
 }) => {
+  const visibleDaysConfig = DAYS_CONFIG.filter(d => !hiddenDays.includes(d.key));
+  const safeVisibleDays = visibleDaysConfig.length > 0 ? visibleDaysConfig : DAYS_CONFIG;
+
   const [charName, setCharName] = useState('');
   const [level, setLevel] = useState<number>(0);
   const [vocation, setVocation] = useState('');
   const [phone, setPhone] = useState('');
-  const [selectedDays, setSelectedDays] = useState<HuntDay[]>(['friday', 'saturday', 'sunday']);
+  const [selectedDays, setSelectedDays] = useState<HuntDay[]>(() => safeVisibleDays.map(d => d.key));
   const [timeSlots, setTimeSlots] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -45,12 +52,14 @@ export const QueroHuntModal: React.FC<QueroHuntModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const visibleKeys = safeVisibleDays.map(d => d.key);
     if (existingPost) {
       setCharName(existingPost.charName || '');
       setLevel(existingPost.level || 0);
       setVocation(existingPost.vocation || '');
       setPhone(existingPost.phone || '');
-      setSelectedDays(existingPost.days && existingPost.days.length > 0 ? existingPost.days : ['friday', 'saturday', 'sunday']);
+      const existingVisible = (existingPost.days || []).filter(d => visibleKeys.includes(d));
+      setSelectedDays(existingVisible.length > 0 ? existingVisible : visibleKeys);
       setTimeSlots(existingPost.timeSlots || '');
       setNotes(existingPost.notes || '');
     } else if (userProfile) {
@@ -58,12 +67,12 @@ export const QueroHuntModal: React.FC<QueroHuntModalProps> = ({
       setLevel(userProfile.level || 0);
       setVocation(userProfile.vocation || 'Elite Knight');
       setPhone('');
-      setSelectedDays(['friday', 'saturday', 'sunday']);
+      setSelectedDays(visibleKeys);
       setTimeSlots('Tarde e Noite');
       setNotes('');
     }
     setError(null);
-  }, [existingPost, userProfile, isOpen]);
+  }, [existingPost, userProfile, isOpen, hiddenDays]);
 
   if (!isOpen) return null;
 
@@ -300,13 +309,18 @@ export const QueroHuntModal: React.FC<QueroHuntModalProps> = ({
             <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-1.5">
               Dias Disponíveis para Caçar *
             </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { key: 'friday' as HuntDay, label: 'Sexta-feira', short: 'SEX' },
-                { key: 'saturday' as HuntDay, label: 'Sábado', short: 'SÁB' },
-                { key: 'sunday' as HuntDay, label: 'Domingo', short: 'DOM' },
-              ].map(d => {
+            <div
+              className={`grid gap-2 ${
+                safeVisibleDays.length === 1
+                  ? 'grid-cols-1'
+                  : safeVisibleDays.length === 2
+                  ? 'grid-cols-2'
+                  : 'grid-cols-3'
+              }`}
+            >
+              {safeVisibleDays.map(d => {
                 const isSelected = selectedDays.includes(d.key);
+                const shortLabel = d.key === 'friday' ? 'SEX' : d.key === 'saturday' ? 'SÁB' : 'DOM';
                 return (
                   <button
                     key={d.key}
@@ -319,7 +333,7 @@ export const QueroHuntModal: React.FC<QueroHuntModalProps> = ({
                     }`}
                   >
                     <Calendar className="h-3.5 w-3.5 shrink-0" />
-                    <span>{d.short}</span>
+                    <span>{shortLabel}</span>
                     {isSelected && <Check className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400 shrink-0" />}
                   </button>
                 );

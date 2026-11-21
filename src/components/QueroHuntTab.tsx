@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LfgPost, UserProfile, HuntDay } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { RANK_METADATA } from '../constants/guildData';
+import { DAYS_CONFIG, RANK_METADATA } from '../constants/guildData';
 import { QueroHuntModal } from './QueroHuntModal';
 import { deleteLfgPost } from '../services/firestoreService';
 import {
@@ -28,15 +28,19 @@ import {
 interface QueroHuntTabProps {
   posts: LfgPost[];
   userProfile: UserProfile | null;
+  hiddenDays?: HuntDay[];
   onNavigateToMyControls?: () => void;
 }
 
 export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
   posts,
   userProfile,
+  hiddenDays = [],
   onNavigateToMyControls,
 }) => {
   const { currentUser, isAdmin } = useAuth();
+  const visibleDaysConfig = DAYS_CONFIG.filter(d => !hiddenDays.includes(d.key));
+  const safeVisibleDays = visibleDaysConfig.length > 0 ? visibleDaysConfig : DAYS_CONFIG;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVocation, setSelectedVocation] = useState<string>('all');
@@ -47,6 +51,12 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<LfgPost | null>(null);
+
+  useEffect(() => {
+    if (selectedDay !== 'all' && hiddenDays.includes(selectedDay)) {
+      setSelectedDay('all');
+    }
+  }, [hiddenDays, selectedDay]);
 
   // Check if current user already has an active post
   const myPost = posts.find(p => p.userUid === currentUser?.uid);
@@ -174,6 +184,11 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
 
   // Filter posts
   const filteredPosts = posts.filter(post => {
+    // Hide posts that only have hidden days selected
+    if (post.days && post.days.length > 0 && !post.days.some(d => !hiddenDays.includes(d))) {
+      return false;
+    }
+
     // Vocation filter
     if (selectedVocation !== 'all') {
       const v = (post.vocation || '').toLowerCase();
@@ -324,7 +339,15 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
           </div>
 
           {/* Day Filter */}
-          <div className="grid grid-cols-4 sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700">
+          <div
+            className={`grid sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 ${
+              safeVisibleDays.length === 1
+                ? 'grid-cols-2'
+                : safeVisibleDays.length === 2
+                ? 'grid-cols-3'
+                : 'grid-cols-4'
+            }`}
+          >
             <button
               onClick={() => setSelectedDay('all')}
               className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
@@ -335,36 +358,28 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
             >
               Todos
             </button>
-            <button
-              onClick={() => setSelectedDay('friday')}
-              className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
-                selectedDay === 'friday'
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                  : 'text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              SEX
-            </button>
-            <button
-              onClick={() => setSelectedDay('saturday')}
-              className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
-                selectedDay === 'saturday'
-                  ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
-                  : 'text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              SÁB
-            </button>
-            <button
-              onClick={() => setSelectedDay('sunday')}
-              className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
-                selectedDay === 'sunday'
-                  ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                  : 'text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              DOM
-            </button>
+            {safeVisibleDays.map(d => {
+              const shortLabel = d.key === 'friday' ? 'SEX' : d.key === 'saturday' ? 'SÁB' : 'DOM';
+              const activeTextClass =
+                d.key === 'friday'
+                  ? 'text-blue-600 dark:text-blue-400'
+                  : d.key === 'saturday'
+                  ? 'text-purple-600 dark:text-purple-400'
+                  : 'text-emerald-600 dark:text-emerald-400';
+              return (
+                <button
+                  key={d.key}
+                  onClick={() => setSelectedDay(d.key)}
+                  className={`min-h-[36px] sm:min-h-[30px] px-2 sm:px-2.5 py-1 text-[11px] font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                    selectedDay === d.key
+                      ? `bg-white dark:bg-slate-900 ${activeTextClass} shadow-xs`
+                      : 'text-slate-500 dark:text-slate-400'
+                  }`}
+                >
+                  {shortLabel}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -460,12 +475,9 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
                         Dias Disponíveis
                       </span>
                       <div className="flex items-center gap-1">
-                        {[
-                          { key: 'friday' as HuntDay, label: 'SEX' },
-                          { key: 'saturday' as HuntDay, label: 'SÁB' },
-                          { key: 'sunday' as HuntDay, label: 'DOM' },
-                        ].map(d => {
+                        {safeVisibleDays.map(d => {
                           const hasDay = post.days && post.days.includes(d.key);
+                          const shortLabel = d.key === 'friday' ? 'SEX' : d.key === 'saturday' ? 'SÁB' : 'DOM';
                           return (
                             <span
                               key={d.key}
@@ -475,7 +487,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
                                   : 'bg-slate-100 dark:bg-slate-800/50 text-slate-300 dark:text-slate-600 border-slate-200/50 dark:border-slate-800/50 opacity-40'
                               }`}
                             >
-                              {d.label}
+                              {shortLabel}
                             </span>
                           );
                         })}
@@ -574,6 +586,7 @@ export const QueroHuntTab: React.FC<QueroHuntTabProps> = ({
         }}
         userProfile={userProfile}
         existingPost={editingPost}
+        hiddenDays={hiddenDays}
         onSuccess={(msg) => {
           setToastMessage(msg);
           setTimeout(() => setToastMessage(null), 3500);

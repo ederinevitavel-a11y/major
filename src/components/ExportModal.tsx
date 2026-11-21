@@ -1,28 +1,37 @@
-import React, { useState } from 'react';
-import { Reservation, HuntDay, SlotType } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Reservation, HuntDay } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
   DAYS_CONFIG,
   NORMAL_RESPAWNS,
-  NORMAL_TIME_SLOTS,
   THREE_HOUR_RESPAWNS,
-  THREE_HOUR_TIME_SLOTS,
 } from '../constants/guildData';
-import { Share2, Copy, Check, X, Shield, Lock, FileSpreadsheet, Download } from 'lucide-react';
+import { Share2, Copy, Check, X, Shield, Lock, FileSpreadsheet } from 'lucide-react';
 
 interface ExportModalProps {
   reservations: Reservation[];
+  hiddenDays?: HuntDay[];
   onClose: () => void;
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
   reservations,
+  hiddenDays = [],
   onClose,
 }) => {
   const { isAdmin, currentUser } = useAuth();
-  const [selectedDay, setSelectedDay] = useState<HuntDay | 'all'>('friday');
+  const visibleDaysConfig = DAYS_CONFIG.filter(d => !hiddenDays.includes(d.key));
+  const safeVisibleDays = visibleDaysConfig.length > 0 ? visibleDaysConfig : DAYS_CONFIG;
+
+  const [selectedDay, setSelectedDay] = useState<HuntDay | 'all'>(() => safeVisibleDays[0]?.key || 'friday');
   const [copied, setCopied] = useState(false);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
+
+  useEffect(() => {
+    if (selectedDay !== 'all' && hiddenDays.includes(selectedDay)) {
+      setSelectedDay(safeVisibleDays[0]?.key || 'all');
+    }
+  }, [hiddenDays, selectedDay, safeVisibleDays]);
 
   const formatSlotLine = (s: Reservation) => {
     const isOwner = Boolean(currentUser && s.userUid === currentUser.uid);
@@ -43,7 +52,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
     output += `-------------------------------------------\n\n`;
 
-    const daysToExport = selectedDay === 'all' ? (['friday', 'saturday', 'sunday'] as HuntDay[]) : [selectedDay];
+    const daysToExport = selectedDay === 'all' ? safeVisibleDays.map(d => d.key) : [selectedDay];
 
     daysToExport.forEach(day => {
       const dayConfig = DAYS_CONFIG.find(d => d.key === day);
@@ -163,7 +172,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <tbody>
       `;
 
-      const daysToExport = selectedDay === 'all' ? (['friday', 'saturday', 'sunday'] as HuntDay[]) : [selectedDay];
+      const daysToExport = selectedDay === 'all' ? safeVisibleDays.map(d => d.key) : [selectedDay];
 
       daysToExport.forEach(dayKey => {
         const dayConfig = DAYS_CONFIG.find(d => d.key === dayKey);
@@ -258,38 +267,27 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
             <span className="text-xs font-semibold text-slate-500">Filtrar dia:</span>
             <div className="grid grid-cols-2 sm:flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
-              <button
-                onClick={() => setSelectedDay('friday')}
-                className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                  selectedDay === 'friday' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
-                }`}
-              >
-                Sexta
-              </button>
-              <button
-                onClick={() => setSelectedDay('saturday')}
-                className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                  selectedDay === 'saturday' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
-                }`}
-              >
-                Sábado
-              </button>
-              <button
-                onClick={() => setSelectedDay('sunday')}
-                className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                  selectedDay === 'sunday' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
-                }`}
-              >
-                Domingo
-              </button>
-              <button
-                onClick={() => setSelectedDay('all')}
-                className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                  selectedDay === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
-                }`}
-              >
-                Fim de Semana
-              </button>
+              {safeVisibleDays.map(d => (
+                <button
+                  key={d.key}
+                  onClick={() => setSelectedDay(d.key)}
+                  className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    selectedDay === d.key ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {d.key === 'friday' ? 'Sexta' : d.label}
+                </button>
+              ))}
+              {safeVisibleDays.length > 1 && (
+                <button
+                  onClick={() => setSelectedDay('all')}
+                  className={`px-3 min-h-[38px] sm:min-h-0 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    selectedDay === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {safeVisibleDays.length === 3 ? 'Fim de Semana' : 'Todos Visíveis'}
+                </button>
+              )}
             </div>
           </div>
 

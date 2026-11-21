@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ReleasedRespawn, UserProfile, HuntDay, Reservation } from '../types';
 import {
   Zap,
@@ -19,17 +19,28 @@ import { claimReleasedRespawn } from '../services/firestoreService';
 interface ReleasedRespawnsTabProps {
   releasedList: ReleasedRespawn[];
   usersList: UserProfile[];
+  hiddenDays?: HuntDay[];
   onNavigateToSchedule: (day?: HuntDay, respawnName?: string) => void;
 }
 
 export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
   releasedList,
   usersList,
+  hiddenDays = [],
   onNavigateToSchedule,
 }) => {
-  const { userProfile, currentUser } = useAuth();
+  const { userProfile } = useAuth();
+  const visibleDaysConfig = DAYS_CONFIG.filter(d => !hiddenDays.includes(d.key));
+  const safeVisibleDays = visibleDaysConfig.length > 0 ? visibleDaysConfig : DAYS_CONFIG;
+
   const [selectedDayFilter, setSelectedDayFilter] = useState<'all' | HuntDay>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    if (selectedDayFilter !== 'all' && hiddenDays.includes(selectedDayFilter)) {
+      setSelectedDayFilter('all');
+    }
+  }, [hiddenDays, selectedDayFilter]);
 
   // Direct Claim Modal state
   const [claimingItem, setClaimingItem] = useState<ReleasedRespawn | null>(null);
@@ -46,9 +57,14 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
     return map;
   }, [usersList]);
 
+  const visibleReleasedList = useMemo(
+    () => releasedList.filter(item => !hiddenDays.includes(item.day)),
+    [releasedList, hiddenDays]
+  );
+
   // Filtered list
   const filteredList = useMemo(() => {
-    return releasedList.filter(item => {
+    return visibleReleasedList.filter(item => {
       // Day filter
       if (selectedDayFilter !== 'all' && item.day !== selectedDayFilter) {
         return false;
@@ -63,12 +79,14 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
       }
       return true;
     });
-  }, [releasedList, selectedDayFilter, searchQuery]);
+  }, [visibleReleasedList, selectedDayFilter, searchQuery]);
 
   // Statistics
-  const fridayCount = releasedList.filter(r => r.day === 'friday').length;
-  const saturdayCount = releasedList.filter(r => r.day === 'saturday').length;
-  const sundayCount = releasedList.filter(r => r.day === 'sunday').length;
+  const dayCounts: Record<HuntDay, number> = {
+    friday: visibleReleasedList.filter(r => r.day === 'friday').length,
+    saturday: visibleReleasedList.filter(r => r.day === 'saturday').length,
+    sunday: visibleReleasedList.filter(r => r.day === 'sunday').length,
+  };
 
   const handleConfirmClaim = async () => {
     if (!claimingItem || !userProfile) return;
@@ -150,43 +168,43 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
         </div>
 
         {/* Quick KPI stats strip */}
-        <div className="mt-6 pt-6 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div
+          className={`mt-6 pt-6 border-t border-slate-800/80 grid gap-3 ${
+            safeVisibleDays.length === 1
+              ? 'grid-cols-2'
+              : safeVisibleDays.length === 2
+              ? 'grid-cols-3'
+              : 'grid-cols-2 sm:grid-cols-4'
+          }`}
+        >
           <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 backdrop-blur-xs">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
               Total Liberados
             </span>
             <div className="text-2xl font-black text-white mt-1 flex items-center gap-2">
               <Zap className="h-5 w-5 text-emerald-400" />
-              <span>{releasedList.length}</span>
+              <span>{visibleReleasedList.length}</span>
             </div>
           </div>
 
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 backdrop-blur-xs">
-            <span className="text-[11px] font-bold text-blue-300 uppercase tracking-wider block">
-              Sexta-feira
-            </span>
-            <div className="text-2xl font-black text-white mt-1">
-              {fridayCount}
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 backdrop-blur-xs">
-            <span className="text-[11px] font-bold text-purple-300 uppercase tracking-wider block">
-              Sábado
-            </span>
-            <div className="text-2xl font-black text-white mt-1">
-              {saturdayCount}
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 backdrop-blur-xs">
-            <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block">
-              Domingo
-            </span>
-            <div className="text-2xl font-black text-white mt-1">
-              {sundayCount}
-            </div>
-          </div>
+          {safeVisibleDays.map(day => {
+            const labelColor =
+              day.key === 'friday'
+                ? 'text-blue-300'
+                : day.key === 'saturday'
+                ? 'text-purple-300'
+                : 'text-amber-300';
+            return (
+              <div key={day.key} className="rounded-2xl bg-white/5 border border-white/10 p-3.5 backdrop-blur-xs">
+                <span className={`text-[11px] font-bold ${labelColor} uppercase tracking-wider block`}>
+                  {day.label}
+                </span>
+                <div className="text-2xl font-black text-white mt-1">
+                  {dayCounts[day.key]}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -203,10 +221,10 @@ export const ReleasedRespawnsTab: React.FC<ReleasedRespawnsTabProps> = ({
                   : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
               }`}
             >
-              Todos ({releasedList.length})
+              Todos ({visibleReleasedList.length})
             </button>
-            {DAYS_CONFIG.map(day => {
-              const count = releasedList.filter(r => r.day === day.key).length;
+            {safeVisibleDays.map(day => {
+              const count = dayCounts[day.key];
               const isSelected = selectedDayFilter === day.key;
               return (
                 <button

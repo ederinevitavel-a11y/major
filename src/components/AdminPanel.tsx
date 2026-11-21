@@ -11,6 +11,7 @@ import {
   removeCustomRespawn,
   deleteReservation,
   resetAllSharedVisibility,
+  saveHiddenDays,
 } from '../services/firestoreService';
 import { fetchGuildMembers, fetchCharacter, mapTibiaRankToPriority } from '../services/tibiaDataService';
 import { fetchGuildHighscores, fetchCharacterHighscores, fetchMissclickMembers } from '../services/missclickApi';
@@ -59,6 +60,7 @@ interface AdminPanelProps {
   onRefreshUsers: () => Promise<void>;
   customRespawns?: CustomRespawn[];
   releasedRespawns?: ReleasedRespawn[];
+  hiddenDays?: HuntDay[];
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -67,11 +69,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onRefreshUsers,
   customRespawns = [],
   releasedRespawns = [],
+  hiddenDays = [],
 }) => {
   const { currentUser } = useAuth();
   const [activeSubTab, setActiveSubTab] = useState<'assign' | 'emails' | 'apis' | 'released' | 'backup'>('assign');
   const releasedRespawnsList = releasedRespawns;
   const [isExcelBackupOpen, setIsExcelBackupOpen] = useState(false);
+  const [savingHiddenDays, setSavingHiddenDays] = useState(false);
 
   const [guildHighscoresData, setGuildHighscoresData] = useState<any>(null);
   const [loadingGuildHs, setLoadingGuildHs] = useState(false);
@@ -115,6 +119,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [resetModalDay, setResetModalDay] = useState<HuntDay>('friday');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const handleToggleDayVisibility = async (dayKey: HuntDay) => {
+    const dayInfo = DAYS_CONFIG.find(d => d.key === dayKey);
+    const dayLabel = dayInfo?.label || dayKey;
+    const isCurrentlyHidden = hiddenDays.includes(dayKey);
+
+    const nextHiddenDays: HuntDay[] = isCurrentlyHidden
+      ? hiddenDays.filter(d => d !== dayKey)
+      : [...hiddenDays, dayKey];
+
+    if (nextHiddenDays.length >= DAYS_CONFIG.length) {
+      setToastMessage('Pelo menos 1 dia deve permanecer visível no aplicativo.');
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
+    setSavingHiddenDays(true);
+    try {
+      await saveHiddenDays(nextHiddenDays, currentUser?.email || 'admin');
+      setToastMessage(
+        isCurrentlyHidden
+          ? `${dayLabel} agora está visível novamente no aplicativo.`
+          : `${dayLabel} foi ocultada no aplicativo! Tudo que estava marcado nesse dia foi escondido para os usuários.`
+      );
+      setTimeout(() => setToastMessage(null), 4500);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao atualizar visibilidade dos dias.';
+      setToastMessage(msg);
+      setTimeout(() => setToastMessage(null), 4500);
+    } finally {
+      setSavingHiddenDays(false);
+    }
+  };
 
   // Dedicated Rank Filter State
   const [selectedRank, setSelectedRank] = useState<'all' | PriorityRank>('all');
@@ -655,6 +692,68 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <Target className="h-4 w-4 shrink-0" />
             <span>+ Cadastrar Respawn</span>
           </button>
+        </div>
+      </div>
+
+      {/* Visibilidade dos Dias no App (Ocultar Dias Passados) */}
+      <div className="mt-3.5 pt-3.5 border-t border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/80 dark:border-amber-800/60 shrink-0">
+            {hiddenDays.length > 0 ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-black text-slate-900 dark:text-white">
+                Visibilidade dos Dias no App
+              </span>
+              {hiddenDays.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                  {hiddenDays.length} {hiddenDays.length === 1 ? 'dia oculto' : 'dias ocultos'}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+              Oculte dias que já passaram para esconder todas as marcações e facilitar a visão dos jogadores (sem apagar os dados).
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 sm:flex items-center gap-1.5 shrink-0">
+          {DAYS_CONFIG.map(day => {
+            const isHidden = hiddenDays.includes(day.key);
+            const isLastVisible = !isHidden && DAYS_CONFIG.length - hiddenDays.length <= 1;
+            return (
+              <button
+                key={day.key}
+                type="button"
+                disabled={savingHiddenDays || isLastVisible}
+                onClick={() => handleToggleDayVisibility(day.key)}
+                title={
+                  isLastVisible
+                    ? 'Pelo menos 1 dia deve ficar visível no app'
+                    : isHidden
+                    ? `Clique para mostrar ${day.label} novamente`
+                    : `Clique para ocultar tudo de ${day.label} para os usuários`
+                }
+                className={`flex items-center justify-center gap-1.5 px-3 min-h-[38px] py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap ${
+                  isHidden
+                    ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/50'
+                }`}
+              >
+                {isHidden ? (
+                  <EyeOff className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                ) : (
+                  <Eye className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                )}
+                <span className="sm:hidden">{day.shortLabel}</span>
+                <span className="hidden sm:inline">{day.label}</span>
+                <span className="hidden md:inline text-[10px] font-extrabold opacity-80">
+                  • {isHidden ? 'Oculto' : 'Visível'}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1379,20 +1478,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {DAYS_CONFIG.map(day => {
               const dayBookings = reservations.filter(r => r.day === day.key);
+              const isHidden = hiddenDays.includes(day.key);
+              const isLastVisible = !isHidden && DAYS_CONFIG.length - hiddenDays.length <= 1;
               return (
                 <div
                   key={day.key}
-                  className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-colors flex flex-col justify-between"
+                  className={`rounded-2xl border p-5 shadow-sm transition-colors flex flex-col justify-between ${
+                    isHidden
+                      ? 'border-amber-200 dark:border-amber-900/60 bg-amber-50/40 dark:bg-amber-950/20'
+                      : 'border-slate-200/90 bg-white dark:border-slate-800 dark:bg-slate-900'
+                  }`}
                 >
                   <div>
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
                           {day.label}
                         </h4>
+                        {isHidden && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shrink-0">
+                            Oculto
+                          </span>
+                        )}
                       </div>
-                      <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700">
+                      <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 shrink-0">
                         {dayBookings.length} ocupado(s)
                       </span>
                     </div>
@@ -1404,17 +1514,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setResetModalDay(day.key);
-                      setIsResetModalOpen(true);
-                    }}
-                    disabled={dayBookings.length === 0}
-                    className="mt-4 w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-rose-200 dark:border-rose-900/60 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    <span>Liberar Respawns de {day.label}</span>
-                  </button>
+                  <div className="mt-4 space-y-2">
+                    <button
+                      type="button"
+                      disabled={savingHiddenDays || isLastVisible}
+                      onClick={() => handleToggleDayVisibility(day.key)}
+                      className={`w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                        isHidden
+                          ? 'border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                          : 'border-amber-200 dark:border-amber-900/60 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+                      }`}
+                    >
+                      {isHidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                      <span>{isHidden ? `Mostrar ${day.label} no App` : `Ocultar ${day.label} no App`}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setResetModalDay(day.key);
+                        setIsResetModalOpen(true);
+                      }}
+                      disabled={dayBookings.length === 0}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-rose-200 dark:border-rose-900/60 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Liberar Respawns de {day.label}</span>
+                    </button>
+                  </div>
                 </div>
               );
             })}

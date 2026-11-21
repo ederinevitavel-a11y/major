@@ -1342,6 +1342,67 @@ export async function updateSystemStatus(status: { lastAutoSyncDate: string }): 
   }
 }
 
+// ---- HIDDEN DAYS VISIBILITY (ADMIN) ----
+const VALID_HUNT_DAYS: HuntDay[] = ['friday', 'saturday', 'sunday'];
+
+function sanitizeHiddenDays(raw: unknown): HuntDay[] {
+  if (!Array.isArray(raw)) return [];
+  const unique = Array.from(
+    new Set(raw.filter((d): d is HuntDay => typeof d === 'string' && VALID_HUNT_DAYS.includes(d as HuntDay)))
+  );
+  // Always keep at least 1 day visible
+  if (unique.length >= VALID_HUNT_DAYS.length) {
+    return unique.slice(0, VALID_HUNT_DAYS.length - 1);
+  }
+  return unique;
+}
+
+export function subscribeToHiddenDays(
+  callback: (hiddenDays: HuntDay[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const path = 'settings/schedule_visibility';
+  return onSnapshot(
+    doc(db, 'settings', 'schedule_visibility'),
+    snapshot => {
+      if (!snapshot.exists()) {
+        callback([]);
+        return;
+      }
+      const data = snapshot.data() as { hiddenDays?: unknown };
+      callback(sanitizeHiddenDays(data?.hiddenDays));
+    },
+    error => {
+      if (onError) onError(error);
+      console.warn(`Hidden days subscription error (${path}):`, error);
+    }
+  );
+}
+
+export async function saveHiddenDays(hiddenDays: HuntDay[], updatedBy?: string): Promise<void> {
+  const unique = Array.from(
+    new Set(hiddenDays.filter((d): d is HuntDay => VALID_HUNT_DAYS.includes(d)))
+  );
+  if (unique.length >= VALID_HUNT_DAYS.length) {
+    throw new Error('Pelo menos 1 dia deve permanecer visível no aplicativo.');
+  }
+
+  const path = 'settings/schedule_visibility';
+  try {
+    await setDoc(
+      doc(db, 'settings', 'schedule_visibility'),
+      cleanData({
+        hiddenDays: unique,
+        updatedBy: updatedBy || 'admin',
+        updatedAt: new Date().toISOString(),
+      })
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
 // ---- CUSTOM RESPAWNS ----
 export async function getCustomRespawns(): Promise<CustomRespawn[]> {
   const path = 'custom_respawns';
